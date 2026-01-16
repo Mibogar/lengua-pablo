@@ -576,3 +576,340 @@
   // Start
   boot();
 })();
+/* =========================================================
+   PATCH BV + RECURSOS (pegar al final de app.js)
+   - Arregla: BV mostrando palabra completa
+   - Restaura: Recursos literarios (teoría + práctica)
+   - No toca Conjugaciones
+========================================================= */
+
+(function () {
+  // Helpers seguros (por si no existen en tu app.js actual)
+  const $ = (s) => document.querySelector(s);
+  const strip = (s) =>
+    String(s ?? "")
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase();
+
+  function safeShowFeedback(msg, kind = "ok") {
+    // Si ya tienes showFeedback(), úsala; si no, intenta pintar en #feedback
+    if (typeof window.showFeedback === "function") {
+      window.showFeedback(msg, kind);
+      return;
+    }
+    const el = $("#feedback");
+    if (!el) return;
+    el.style.display = "block";
+    el.textContent = msg;
+    el.className = "feedback " + (kind === "error" ? "bad" : "ok");
+  }
+
+  function cloneToRemoveListeners(el) {
+    if (!el) return null;
+    const c = el.cloneNode(true);
+    el.replaceWith(c);
+    return c;
+  }
+
+  // =========================================================
+  // 1) BV (b / v)
+  // JSON esperado (flexible):
+  // - Puede ser array de strings ("tubo") o array de objetos.
+  // - Si es objeto, admite: { palabra, pos, correcta, incorrecta }
+  //   pos: índice donde va b/v (si no, se busca la primera b/v)
+  // =========================================================
+  const BV = {
+    data: [],
+    idx: 0,
+    current: null, // {word, pos, correctChar, masked}
+  };
+
+  function bvPickCurrent() {
+    if (!BV.data.length) return null;
+
+    const raw = BV.data[BV.idx % BV.data.length];
+    BV.idx = (BV.idx + 1) % BV.data.length;
+
+    let word = "";
+    let pos = -1;
+
+    if (typeof raw === "string") {
+      word = raw.trim();
+    } else {
+      word = String(raw.palabra ?? raw.word ?? raw.text ?? "").trim();
+      if (Number.isInteger(raw.pos)) pos = raw.pos;
+    }
+
+    if (!word) return null;
+
+    // Decide posición (si no viene)
+    if (pos < 0) {
+      const pB = word.toLowerCase().indexOf("b");
+      const pV = word.toLowerCase().indexOf("v");
+      if (pB === -1 && pV === -1) pos = -1;
+      else if (pB === -1) pos = pV;
+      else if (pV === -1) pos = pB;
+      else pos = Math.min(pB, pV);
+    }
+
+    if (pos < 0) {
+      // No hay b/v, lo dejamos como palabra normal pero avisamos
+      return {
+        word,
+        pos: -1,
+        correctChar: "",
+        masked: word,
+      };
+    }
+
+    const correctChar = word[pos].toLowerCase();
+    const masked =
+      word.slice(0, pos) + "_" + word.slice(pos + 1);
+
+    return { word, pos, correctChar, masked };
+  }
+
+  function bvRender() {
+    const wordEl = $("#bvWord");
+    const revealEl = $("#bvReveal");
+
+    if (!wordEl) return;
+
+    if (!BV.current) {
+      wordEl.textContent = "(no hay palabras en bv.json)";
+      if (revealEl) revealEl.textContent = "";
+      return;
+    }
+
+    // Mostrar con hueco (NUNCA la resuelta)
+    wordEl.textContent = BV.current.pos >= 0 ? BV.current.masked : BV.current.word;
+
+    // Oculta “reveal” por defecto (si existe)
+    if (revealEl) revealEl.textContent = "";
+  }
+
+  function bvCheck(choiceChar) {
+    if (!BV.current) return;
+
+    if (BV.current.pos < 0 || !BV.current.correctChar) {
+      safeShowFeedback("Esta palabra no tiene b/v para practicar.", "error");
+      return;
+    }
+
+    const ok = choiceChar === BV.current.correctChar;
+
+    if (ok) {
+      safeShowFeedback("¡Correcto!", "ok");
+      // Pintar ya la palabra completa
+      const wordEl = $("#bvWord");
+      if (wordEl) wordEl.textContent = BV.current.word;
+    } else {
+      safeShowFeedback(`No. Era "${BV.current.correctChar}".`, "error");
+      const revealEl = $("#bvReveal");
+      if (revealEl) revealEl.textContent = `Solución: ${BV.current.word}`;
+    }
+  }
+
+  async function bvLoad() {
+    // Usa PATHS.bv si existe; si no, usa ruta estándar
+    const path =
+      (window.PATHS && window.PATHS.bv) || "data/bv.json";
+
+    const res = await fetch(path, { cache: "no-store" });
+    if (!res.ok) throw new Error("No se pudo cargar " + path);
+    const json = await res.json();
+    BV.data = Array.isArray(json) ? json : (json.items || json.data || []);
+  }
+
+  async function initBV_PATCH() {
+    const view = $("#bv");
+    if (!view) return; // si no existe la vista, no hacemos nada
+
+    // Resetea listeners “antiguos”
+    const btnB = cloneToRemoveListeners($("#bvB"));
+    const btnV = cloneToRemoveListeners($("#bvV"));
+    const btnNext = cloneToRemoveListeners($("#bvNext"));
+
+    try {
+      if (!BV.data.length) await bvLoad();
+    } catch (e) {
+      console.error(e);
+      safeShowFeedback("Error cargando bv.json", "error");
+      const wordEl = $("#bvWord");
+      if (wordEl) wordEl.textContent = "(error cargando bv.json)";
+      return;
+    }
+
+    BV.current = bvPickCurrent();
+    bvRender();
+
+    if (btnB) btnB.addEventListener("click", () => bvCheck("b"));
+    if (btnV) btnV.addEventListener("click", () => bvCheck("v"));
+    if (btnNext)
+      btnNext.addEventListener("click", () => {
+        BV.current = bvPickCurrent();
+        bvRender();
+      });
+  }
+
+  // =========================================================
+  // 2) RECURSOS LITERARIOS
+  // JSON esperado (flexible):
+  // array de objetos con:
+  // { recurso, definicion, ejemplo, opciones? }
+  // opciones puede ser array de nombres de recursos (para test)
+  // =========================================================
+  const REC = {
+    data: [],
+    idx: 0,
+    mode: "practice", // "theory" | "practice"
+    current: null,
+  };
+
+  function recPick() {
+    if (!REC.data.length) return null;
+    const item = REC.data[REC.idx % REC.data.length];
+    REC.idx = (REC.idx + 1) % REC.data.length;
+    return item;
+  }
+
+  function recAllNames() {
+    const names = REC.data
+      .map((x) => (x && (x.recurso || x.name)) ? String(x.recurso || x.name) : "")
+      .filter(Boolean);
+    return Array.from(new Set(names));
+  }
+
+  function recRender() {
+    const promptEl = $("#recPrompt");
+    const buttonsEl = $("#recButtons");
+    const nextEl = $("#recNext");
+    const theoryBtn = $("#recTheory");
+    const practiceBtn = $("#recPractice");
+
+    if (!promptEl || !buttonsEl) return;
+
+    // Estado visual botones modo
+    if (theoryBtn) theoryBtn.classList.toggle("active", REC.mode === "theory");
+    if (practiceBtn) practiceBtn.classList.toggle("active", REC.mode === "practice");
+
+    if (!REC.current) {
+      promptEl.textContent = "(no hay recursos en recursos.json)";
+      buttonsEl.innerHTML = "";
+      return;
+    }
+
+    const recurso = String(REC.current.recurso || REC.current.name || "").trim();
+    const definicion = String(REC.current.definicion || REC.current.def || "").trim();
+    const ejemplo = String(REC.current.ejemplo || REC.current.example || "").trim();
+
+    if (REC.mode === "theory") {
+      promptEl.innerHTML = `
+        <div style="margin-bottom:10px;"><strong>${recurso}</strong></div>
+        <div style="margin-bottom:10px;">${definicion || ""}</div>
+        <div style="opacity:.9;"><em>${ejemplo || ""}</em></div>
+      `;
+      buttonsEl.innerHTML = "";
+      if (nextEl) nextEl.textContent = "Siguiente";
+      return;
+    }
+
+    // PRACTICE
+    promptEl.innerHTML = `
+      <div style="margin-bottom:10px;"><strong>¿Qué recurso literario es?</strong></div>
+      <div style="opacity:.95;"><em>${ejemplo || "(sin ejemplo)"}</em></div>
+    `;
+
+    // Opciones
+    let options = REC.current.opciones;
+    if (!Array.isArray(options) || options.length < 2) {
+      // construir opciones automáticas
+      const pool = recAllNames().filter((n) => n !== recurso);
+      // coge 3 al azar + la correcta
+      const picked = [];
+      while (pool.length && picked.length < 3) {
+        const i = Math.floor(Math.random() * pool.length);
+        picked.push(pool.splice(i, 1)[0]);
+      }
+      options = [recurso, ...picked].filter(Boolean);
+    }
+
+    // barajar
+    options = options.slice().sort(() => Math.random() - 0.5);
+
+    buttonsEl.innerHTML = "";
+    options.forEach((opt) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "btn";
+      b.textContent = opt;
+      b.addEventListener("click", () => {
+        const ok = strip(opt) === strip(recurso);
+        if (ok) safeShowFeedback("¡Correcto!", "ok");
+        else safeShowFeedback(`No. Era: ${recurso}`, "error");
+      });
+      buttonsEl.appendChild(b);
+    });
+
+    if (nextEl) nextEl.textContent = "Siguiente";
+  }
+
+  async function recLoad() {
+    const path =
+      (window.PATHS && window.PATHS.recursos) || "data/recursos.json";
+
+    const res = await fetch(path, { cache: "no-store" });
+    if (!res.ok) throw new Error("No se pudo cargar " + path);
+    const json = await res.json();
+    REC.data = Array.isArray(json) ? json : (json.items || json.data || []);
+  }
+
+  async function initREC_PATCH() {
+    const view = $("#recursos");
+    if (!view) return;
+
+    // Resetea listeners
+    const theoryBtn = cloneToRemoveListeners($("#recTheory"));
+    const practiceBtn = cloneToRemoveListeners($("#recPractice"));
+    const nextBtn = cloneToRemoveListeners($("#recNext"));
+
+    try {
+      if (!REC.data.length) await recLoad();
+    } catch (e) {
+      console.error(e);
+      safeShowFeedback("Error cargando recursos.json", "error");
+      const promptEl = $("#recPrompt");
+      if (promptEl) promptEl.textContent = "(error cargando recursos.json)";
+      return;
+    }
+
+    REC.current = recPick();
+    REC.mode = "practice";
+    recRender();
+
+    if (theoryBtn)
+      theoryBtn.addEventListener("click", () => {
+        REC.mode = "theory";
+        recRender();
+      });
+
+    if (practiceBtn)
+      practiceBtn.addEventListener("click", () => {
+        REC.mode = "practice";
+        recRender();
+      });
+
+    if (nextBtn)
+      nextBtn.addEventListener("click", () => {
+        REC.current = recPick();
+        recRender();
+      });
+  }
+
+  // Arranque: cuando cargue la página, inicializa BV y Recursos (sin tocar conjugaciones)
+  window.addEventListener("DOMContentLoaded", () => {
+    initBV_PATCH();
+    initREC_PATCH();
+  });
+})();
