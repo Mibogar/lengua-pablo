@@ -1,860 +1,631 @@
-/* 
-  Lengua — Pablo (GitHub Pages)
-  App 100% estática (HTML+CSS+JS).
-
-  Secciones:
-  - Conjugaciones verbales
-      * Reconocer: ver una frase y escribir el verbo (o grupo verbal) tal cual.
-      * Producir: ver una forma (p.ej. "nos lavamos") y clasificarla en 3 pasos:
-          1) Modo: Indicativo / Subjuntivo / Imperativo
-          2) Bloque: Presente / Pretérito / Futuro / Condicional
-          3) Tipo exacto (dependiente del bloque)
-  - Ortografía b/v
-  - Recursos literarios
-*/
+/* =========================================================
+   Lengua — Pablo (GitHub Pages, vanilla JS)
+   - Conjugaciones: Reconocer / Producir
+   - b/v
+   - Recursos literarios
+   FIX:
+   - Botones de "Producir" funcionando (event delegation)
+   - Paso 3 depende de Paso 2 (filtrado de opciones)
+   ========================================================= */
 
 (() => {
-  'use strict';
+  "use strict";
 
-  // ---------------------------
-  // Helpers
-  // ---------------------------
+  // ---------- Helpers ----------
   const $ = (sel, root = document) => root.querySelector(sel);
-  const $$ = (sel, root = document) => Array.from(root.querySelectorAll(sel));
-  const clamp = (n, a, b) => Math.max(a, Math.min(b, n));
 
   function norm(s) {
-    return String(s ?? '')
+    return String(s ?? "")
       .trim()
       .toLowerCase()
-      .replaceAll('\u00A0', ' ');
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "");
   }
 
-  function show(el) {
+  function eqLoose(a, b) {
+    return norm(a) === norm(b);
+  }
+
+  function choiceButton(label, key, value, selected) {
+    const cls = selected ? "chip selected" : "chip";
+    return `<button type="button" class="${cls}" data-action="pick" data-key="${key}" data-value="${value}">${label}</button>`;
+  }
+
+  function show(el, yes) {
     if (!el) return;
-    el.classList.remove('hidden');
-    el.style.display = '';
+    el.classList.toggle("active", !!yes);
   }
 
-  function hide(el) {
-    if (!el) return;
-    el.classList.add('hidden');
-    el.style.display = 'none';
+  function setText(sel, txt) {
+    const el = $(sel);
+    if (el) el.textContent = txt;
   }
 
-  function setModeTitle(text) {
-    const t = $('#modeTitle');
-    if (t) t.textContent = text ? ` ${text}` : '';
+  function escapeHtml(str) {
+    return String(str ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
   }
 
-  function setFeedback(type, html) {
-    const box = $('#feedback');
-    if (!box) return;
-    box.classList.remove('ok', 'bad');
-    if (!html) {
-      hide(box);
-      box.innerHTML = '';
+  // ---------- Data loading ----------
+  const Data = {
+    conjugaciones: null,
+    bv: null,
+    recursos: null
+  };
+
+  async function fetchJSON(path) {
+    const r = await fetch(path, { cache: "no-store" });
+    if (!r.ok) throw new Error(`No se pudo cargar ${path} (${r.status})`);
+    return await r.json();
+  }
+
+  async function loadAll() {
+    // Rutas esperadas por tu repo
+    // data/conjugaciones.json, data/bv.json, data/recursos.json
+    const [c, b, r] = await Promise.all([
+      fetchJSON("./data/conjugaciones.json"),
+      fetchJSON("./data/bv.json"),
+      fetchJSON("./data/recursos.json")
+    ]);
+    Data.conjugaciones = Array.isArray(c) ? c : (c?.items ?? []);
+    Data.bv = Array.isArray(b) ? b : (b?.items ?? []);
+    Data.recursos = Array.isArray(r) ? r : (r?.items ?? []);
+  }
+
+  // ---------- App state ----------
+  const State = {
+    view: "home", // home | conj | bv | rec
+    // Conjugaciones
+    conjMode: "reconocer", // reconocer | producir
+    conjIdx: 0,
+    conjAnswered: false,
+    conjOK: null,
+    conjUserVerb: "",
+    // Producir (clasificar)
+    prodPick: {
+      modo: null,     // Indicativo/Subjuntivo/Imperativo
+      grupo: null,    // Presente/Pretérito/Futuro/Condicional
+      exacto: null    // depende de grupo
+    },
+    // b/v
+    bvIdx: 0,
+    bvOK: null,
+    // recursos
+    recMode: "teoria", // teoria | practica
+    recIdx: 0,
+    recOK: null
+  };
+
+  // ---------- DOM roots ----------
+  const header = $(".header");
+  const main = $("main");
+  const feedback = $("#feedback");
+
+  function setFeedback(kind, msg) {
+    if (!feedback) return;
+    feedback.style.display = msg ? "flex" : "none";
+    feedback.classList.remove("ok", "bad");
+    if (kind === "ok") feedback.classList.add("ok");
+    if (kind === "bad") feedback.classList.add("bad");
+    feedback.textContent = msg || "";
+  }
+
+  // ---------- Conjugaciones: mapping (3 pasos) ----------
+  const STEP2_OPTIONS = ["Presente", "Pretérito", "Futuro", "Condicional"];
+
+  function exactOptionsForGrupo(grupo, modo) {
+    // Si Pablo elige Modo = Imperativo, lo tratamos como:
+    // 2) Presente, 3) Imperativo (y no mostramos cosas raras)
+    if (modo === "Imperativo") {
+      return ["Imperativo"];
+    }
+    switch (grupo) {
+      case "Presente":
+        return ["Presente"];
+      case "Pretérito":
+        return ["Imperfecto", "Perfecto simple", "Perfecto compuesto", "Pluscuamperfecto"];
+      case "Futuro":
+        return ["Futuro", "Futuro perfecto"];
+      case "Condicional":
+        return ["Condicional", "Condicional perfecto"];
+      default:
+        return [];
+    }
+  }
+
+  function normalizeModo(raw) {
+    const x = norm(raw);
+    if (x.includes("subj")) return "Subjuntivo";
+    if (x.includes("imperat")) return "Imperativo";
+    return "Indicativo";
+  }
+
+  function normalizeGrupo(raw) {
+    const x = norm(raw);
+    // Intentamos reconocer según texto
+    if (x.includes("cond")) return "Condicional";
+    if (x.includes("futu")) return "Futuro";
+    if (x.includes("pret") || x.includes("pasad") || x.includes("imperf") || x.includes("plusc") || x.includes("perfecto")) return "Pretérito";
+    if (x.includes("pres")) return "Presente";
+    return null;
+  }
+
+  function normalizeExacto(raw) {
+    const x = norm(raw);
+    if (!x) return null;
+    if (x.includes("imperat")) return "Imperativo";
+    if (x.includes("plusc")) return "Pluscuamperfecto";
+    if (x.includes("imperf")) return "Imperfecto";
+    if (x.includes("futuro perfecto")) return "Futuro perfecto";
+    if (x === "futuro") return "Futuro";
+    if (x.includes("condicional perfecto") || x.includes("condicional compuesto")) return "Condicional perfecto";
+    if (x.includes("condicional")) return "Condicional";
+    if (x.includes("perfecto simple") || x.includes("indefinido") || x.includes("preterito perfecto simple")) return "Perfecto simple";
+    if (x.includes("perfecto compuesto") || x.includes("preterito perfecto compuesto")) return "Perfecto compuesto";
+    if (x.includes("presente")) return "Presente";
+    return null;
+  }
+
+  function getFormaFromRow(row) {
+    // Intentamos varias claves típicas
+    const candidates = [
+      row.forma,
+      row.formaConjugada,
+      row.forma_verbal,
+      row.verbo_forma,
+      row.formaVerbal,
+      row.respuesta, // a veces guardan aquí
+      row.verbForm
+    ];
+    const found = candidates.find(v => String(v ?? "").trim() !== "");
+    return found ? String(found).trim() : "";
+  }
+
+  function getVerbAnswerFromRow(row) {
+    // Para Reconocer
+    const candidates = [
+      row.verbo,
+      row.respuesta,
+      row.verb,
+      row.answer
+    ];
+    const found = candidates.find(v => String(v ?? "").trim() !== "");
+    return found ? String(found).trim() : "";
+  }
+
+  function getSentenceFromRow(row) {
+    const candidates = [
+      row.frase,
+      row.oracion,
+      row.sentence,
+      row.texto
+    ];
+    const found = candidates.find(v => String(v ?? "").trim() !== "");
+    return found ? String(found).trim() : "";
+  }
+
+  function expected3StepsFromRow(row) {
+    // Intentamos leer del JSON y normalizar.
+    // Si tu JSON tiene "modo" y "tiempo" (exacto), lo usamos.
+    const modo = normalizeModo(row.modo || row.Modo || row.mood);
+    const exact = normalizeExacto(row.tiempo || row.Tiempo || row.exacto || row.tipo_exacto || row.tense);
+
+    // Grupo: o lo trae explícito, o lo inferimos de "tiempo"
+    const grupo =
+      normalizeGrupo(row.grupo || row.grupo2 || row.tiempo2 || row.grupoTiempo || row.time_group) ||
+      (exact === "Presente" ? "Presente"
+        : ["Imperfecto", "Perfecto simple", "Perfecto compuesto", "Pluscuamperfecto"].includes(exact) ? "Pretérito"
+        : ["Futuro", "Futuro perfecto"].includes(exact) ? "Futuro"
+        : ["Condicional", "Condicional perfecto"].includes(exact) ? "Condicional"
+        : null);
+
+    // Caso Imperativo: fijamos grupo y exacto
+    if (modo === "Imperativo") {
+      return { modo, grupo: "Presente", exacto: "Imperativo" };
+    }
+
+    return { modo, grupo, exacto: exact };
+  }
+
+  // ---------- Render ----------
+  function render() {
+    setFeedback(null, "");
+
+    if (!main) return;
+
+    if (State.view === "home") return renderHome();
+    if (State.view === "conj") return renderConj();
+    if (State.view === "bv") return renderBV();
+    if (State.view === "rec") return renderRecursos();
+  }
+
+  function renderHome() {
+    main.innerHTML = `
+      <section class="card">
+        <h2>¿Qué vamos a estudiar?</h2>
+        <div class="choiceGrid">
+          <button class="btn" data-action="nav" data-to="conj">Conjugaciones verbales</button>
+          <button class="btn" data-action="nav" data-to="bv">Uso de b / v</button>
+          <button class="btn" data-action="nav" data-to="rec">Recursos literarios</button>
+        </div>
+        <div class="hint">Tip: la app no distingue mayúsculas.</div>
+      </section>
+    `;
+  }
+
+  function renderConj() {
+    const list = Data.conjugaciones || [];
+    if (!list.length) {
+      main.innerHTML = `<section class="card"><h2>Conjugaciones</h2><p>No hay datos cargados.</p></section>`;
       return;
     }
-    box.classList.add(type === 'ok' ? 'ok' : 'bad');
-    box.innerHTML = html;
-    show(box);
-  }
 
-  function shuffle(arr) {
-    const a = arr.slice();
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
+    const row = list[State.conjIdx % list.length];
+
+    const modeTabs = `
+      <div class="choices" style="margin-bottom:10px">
+        <button class="${State.conjMode === "reconocer" ? "chip selected" : "chip"}" data-action="setConjMode" data-mode="reconocer">Reconocer</button>
+        <button class="${State.conjMode === "producir" ? "chip selected" : "chip"}" data-action="setConjMode" data-mode="producir">Producir</button>
+      </div>
+    `;
+
+    if (State.conjMode === "reconocer") {
+      const sentence = getSentenceFromRow(row);
+      main.innerHTML = `
+        <section class="card">
+          <h2>Conjugaciones</h2>
+          ${modeTabs}
+          <div class="sentence">${escapeHtml(sentence || "(sin frase en el JSON)")}</div>
+
+          <div class="question">
+            <input id="verbInput" type="text" placeholder="Escribe el verbo (o grupo verbal) tal como aparece" value="${escapeHtml(State.conjUserVerb)}" />
+            <button class="btn" data-action="checkVerb">Comprobar</button>
+          </div>
+
+          <div class="footerNote">Escribe el verbo tal como aparece en la frase.</div>
+
+          <div style="margin-top:12px">
+            <button class="link" data-action="nextConj">Siguiente</button>
+          </div>
+        </section>
+      `;
+      return;
     }
-    return a;
-  }
-
-  async function loadJSON(path) {
-    const res = await fetch(path, { cache: 'no-store' });
-    if (!res.ok) throw new Error(`No se pudo cargar ${path} (${res.status})`);
-    return res.json();
-  }
-
-  // ---------------------------
-  // Navegación por pantallas
-  // ---------------------------
-  const views = {
-    home: $('#home'),
-    conjugaciones: $('#conjugaciones'),
-    bv: $('#bv'),
-    recursos: $('#recursos'),
-  };
-
-  function showView(key) {
-    for (const [k, el] of Object.entries(views)) {
-      if (!el) continue;
-      el.classList.toggle('active', k === key);
-    }
-  }
-
-  // ---------------------------
-  // Estado / marcador
-  // ---------------------------
-  const scoreState = {
-    ok: 0,
-    total: 0,
-  };
-
-  function updateScore() {
-    const el = $('#score');
-    if (el) el.textContent = `Aciertos: ${scoreState.ok} / ${Math.max(1, scoreState.total)}`;
-  }
-
-  function resetScore() {
-    scoreState.ok = 0;
-    scoreState.total = 0;
-    updateScore();
-    setFeedback(null, '');
-  }
-
-  // ---------------------------
-  // Datos
-  // ---------------------------
-  const dataState = {
-    conjugaciones: [],
-    bv: [],
-    recursos: null,
-  };
-
-  // ---------------------------
-  // Mapeo de tiempos -> niveles (Producir)
-  // ---------------------------
-  const STEP2 = ['Presente', 'Pretérito', 'Futuro', 'Condicional'];
-
-  const STEP3_BY_STEP2 = {
-    Presente: ['Presente'],
-    Pretérito: ['Imperfecto', 'Perfecto simple', 'Perfecto compuesto', 'Pluscuamperfecto'],
-    Futuro: ['Futuro', 'Futuro perfecto'],
-    Condicional: ['Condicional', 'Condicional perfecto'],
-  };
-
-  function parseStep2(tiempo, modo) {
-    const t = String(tiempo ?? '').trim();
-    if (modo === 'Imperativo') return null;
-    if (!t) return null;
-    if (/^presente/i.test(t)) return 'Presente';
-    if (/^pretérito/i.test(t) || /imperfecto/i.test(t)) return 'Pretérito';
-    if (/^futuro/i.test(t)) return 'Futuro';
-    if (/^condicional/i.test(t)) return 'Condicional';
-    return null;
-  }
-
-  function parseStep3(tiempo, modo) {
-    if (modo === 'Imperativo') return 'Imperativo';
-    const t = String(tiempo ?? '').trim().toLowerCase();
-
-    if (t === 'presente') return 'Presente';
-    if (t.includes('imperfecto')) return 'Imperfecto';
-    if (t.includes('pluscuamperfecto')) return 'Pluscuamperfecto';
-    if (t.includes('perfecto compuesto')) return 'Perfecto compuesto';
-    if (t.includes('perfecto simple')) return 'Perfecto simple';
-    if (t.includes('futuro perfecto')) return 'Futuro perfecto';
-    if (t === 'futuro simple' || t === 'futuro') return 'Futuro';
-    if (t.includes('condicional perfecto')) return 'Condicional perfecto';
-    if (t === 'condicional simple' || t === 'condicional') return 'Condicional';
-
-    // Si viene algo raro, intentamos heurística mínima
-    if (t.startsWith('pretérito')) {
-      if (t.includes('compuesto')) return 'Perfecto compuesto';
-      if (t.includes('simple')) return 'Perfecto simple';
-      if (t.includes('plus')) return 'Pluscuamperfecto';
-      if (t.includes('imperfect')) return 'Imperfecto';
-    }
-    return null;
-  }
-
-  // ---------------------------
-  // Render: HOME (botones principales)
-  // ---------------------------
-  function wireHomeButtons() {
-    const btnConj = $('#goConjugaciones');
-    const btnBV = $('#goBV');
-    const btnRec = $('#goRecursos');
-
-    if (btnConj) {
-      btnConj.addEventListener('click', () => {
-        resetScore();
-        setModeTitle('Conjugaciones verbales');
-        showView('conjugaciones');
-        Conj.initIfNeeded();
-        Conj.showTab('reconocer');
-      });
-    }
-    if (btnBV) {
-      btnBV.addEventListener('click', () => {
-        resetScore();
-        setModeTitle('Ortografía: b / v');
-        showView('bv');
-        BV.initIfNeeded();
-        BV.next();
-      });
-    }
-    if (btnRec) {
-      btnRec.addEventListener('click', () => {
-        resetScore();
-        setModeTitle('Recursos literarios');
-        showView('recursos');
-        Recursos.initIfNeeded();
-        Recursos.showMode('teoria');
-      });
-    }
-  }
-
-  function wireFooter() {
-    const homeLink = $('#homeLink');
-    const resetLink = $('#resetLink');
-
-    if (homeLink) {
-      homeLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        setModeTitle('');
-        setFeedback(null, '');
-        showView('home');
-      });
-    }
-
-    if (resetLink) {
-      resetLink.addEventListener('click', (e) => {
-        e.preventDefault();
-        resetScore();
-        Conj.reset();
-        BV.reset();
-        Recursos.reset();
-      });
-    }
-  }
-
-  // ---------------------------
-  // Conjugaciones
-  // ---------------------------
-  const Conj = (() => {
-    let inited = false;
-
-    // estado común
-    let tab = 'reconocer'; // reconocer | producir
-    let idx = 0;
-
-    // RECONOCER
-    let current = null;
 
     // PRODUCIR
-    let currentP = null;
-    const sel = {
-      step1: null, // Indicativo/Subjuntivo/Imperativo
-      step2: null, // Presente/Pretérito/Futuro/Condicional
-      step3: null, // depende
-    };
+    const forma = getFormaFromRow(row) || "(sin forma en el JSON)";
+    const expected = expected3StepsFromRow(row);
 
-    function initIfNeeded() {
-      if (inited) return;
-      inited = true;
+    const pickedModo = State.prodPick.modo;
+    const pickedGrupo = State.prodPick.grupo;
+    const pickedExact = State.prodPick.exacto;
 
-      const root = views.conjugaciones;
-      if (!root) return;
+    // Step 1: modo
+    const modoOptions = ["Indicativo", "Subjuntivo", "Imperativo"];
+    const modoBtns = modoOptions
+      .map(m => choiceButton(m, "modo", m, pickedModo === m))
+      .join("");
 
-      // Renderizamos el interior para no depender de ids antiguos.
-      root.innerHTML = `
-        <div class="card">
-          <div class="sectionTitle">Conjugaciones</div>
+    // Step 2: grupo (si modo imperativo, solo habilitamos Presente)
+    const step2Btns = STEP2_OPTIONS.map(g => {
+      const disabled = (pickedModo === "Imperativo" && g !== "Presente");
+      const cls = (pickedGrupo === g ? "chip selected" : "chip") + (disabled ? " disabled" : "");
+      return `<button type="button" class="${cls}" data-action="pick" data-key="grupo" data-value="${g}" ${disabled ? "disabled" : ""}>${g}</button>`;
+    }).join("");
 
-          <div class="choices" style="margin: 8px 0 14px;">
-            <button class="chip" id="conjTabReconocer" type="button">Reconocer</button>
-            <button class="chip" id="conjTabProducir" type="button">Producir</button>
-          </div>
+    // Step 3: exacto (depende de grupo; si no hay grupo, no mostramos opciones)
+    let exactBtns = "";
+    let exactHint = "";
+    if (!pickedGrupo) {
+      exactHint = `<div class="hint">Elige antes el paso 2.</div>`;
+    } else {
+      const opts = exactOptionsForGrupo(pickedGrupo, pickedModo || expected.modo);
+      exactBtns = opts.map(e => choiceButton(e, "exacto", e, pickedExact === e)).join("");
+    }
 
-          <!-- RECONOCER -->
-          <div id="conjViewReconocer">
-            <div class="sentence" id="conjSentence">...</div>
+    main.innerHTML = `
+      <section class="card">
+        <h2>Conjugaciones</h2>
+        ${modeTabs}
 
-            <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-top:10px;">
-              <input id="conjAnswer" type="text" placeholder="Escribe el verbo (o grupo verbal)" autocomplete="off" />
-              <button class="btn" id="conjCheck" type="button">Comprobar</button>
-            </div>
+        <div class="sentence"><b>Forma:</b> ${escapeHtml(forma)}</div>
+        <div class="footerNote">Clasifica esta forma en 3 pasos.</div>
 
-            <div class="hint" style="margin-top:8px;">Escribe el verbo (o grupo verbal) tal como aparece en la frase.</div>
+        <div class="question">
+          <div style="margin-top:8px"><b>1) Modo</b></div>
+          <div class="choices">${modoBtns}</div>
 
-            <div style="margin-top:14px; display:flex; justify-content:flex-end;">
-              <button class="btn" id="conjNext" type="button">Siguiente</button>
-            </div>
-          </div>
+          <div style="margin-top:12px"><b>2) Presente / Pretérito / Futuro / Condicional</b></div>
+          <div class="choices">${step2Btns}</div>
 
-          <!-- PRODUCIR -->
-          <div id="conjViewProducir" class="hidden">
-            <div class="sentence" id="prodFormLine">Forma: ...</div>
-            <div class="hint" style="margin-top:6px;">Clasifica esta forma en 3 pasos.</div>
+          <div style="margin-top:12px"><b>3) Tipo exacto</b></div>
+          ${exactHint}
+          <div class="choices">${exactBtns}</div>
 
-            <div style="margin-top:10px;">
-              <div class="question">1) Modo</div>
-              <div class="choices" id="prodStep1"></div>
-
-              <div class="question" style="margin-top:10px;">2) Presente / Pretérito / Futuro / Condicional</div>
-              <div class="choices" id="prodStep2"></div>
-
-              <div class="question" style="margin-top:10px;">3) Tipo exacto</div>
-              <div class="choices" id="prodStep3"></div>
-            </div>
-
-            <div style="margin-top:14px; display:flex; gap:10px; justify-content:flex-start; flex-wrap:wrap;">
-              <button class="btn" id="prodCheck" type="button">Comprobar</button>
-              <button class="btn" id="prodNext" type="button">Siguiente</button>
-            </div>
+          <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
+            <button class="btn" data-action="checkProducir">Comprobar</button>
+            <button class="link" data-action="nextProducir">Siguiente</button>
           </div>
         </div>
-      `;
-
-      // Tabs
-      $('#conjTabReconocer')?.addEventListener('click', () => showTab('reconocer'));
-      $('#conjTabProducir')?.addEventListener('click', () => showTab('producir'));
-
-      // Reconocer handlers
-      $('#conjCheck')?.addEventListener('click', onCheckReconocer);
-      $('#conjNext')?.addEventListener('click', () => {
-        setFeedback(null, '');
-        nextReconocer();
-      });
-      $('#conjAnswer')?.addEventListener('keydown', (e) => {
-        if (e.key === 'Enter') onCheckReconocer();
-      });
-
-      // Producir handlers
-      $('#prodCheck')?.addEventListener('click', onCheckProducir);
-      $('#prodNext')?.addEventListener('click', () => {
-        setFeedback(null, '');
-        nextProducir();
-      });
-
-      // Render buttons step1/step2 (fijos)
-      renderProdStep1();
-      renderProdStep2();
-      renderProdStep3(); // vacío inicial
-    }
-
-    function reset() {
-      idx = 0;
-      current = null;
-      currentP = null;
-      sel.step1 = sel.step2 = sel.step3 = null;
-      setFeedback(null, '');
-
-      if (inited) {
-        $('#conjAnswer') && ($('#conjAnswer').value = '');
-        $('#conjSentence') && ($('#conjSentence').textContent = '...');
-        $('#prodFormLine') && ($('#prodFormLine').textContent = 'Forma: ...');
-        renderProdStep1();
-        renderProdStep2();
-        renderProdStep3();
-      }
-    }
-
-    function showTab(which) {
-      tab = which;
-      setFeedback(null, '');
-
-      const vR = $('#conjViewReconocer');
-      const vP = $('#conjViewProducir');
-
-      if (which === 'reconocer') {
-        show(vR);
-        hide(vP);
-        $('#conjTabReconocer')?.classList.add('active');
-        $('#conjTabProducir')?.classList.remove('active');
-        if (!current) nextReconocer(true);
-      } else {
-        hide(vR);
-        show(vP);
-        $('#conjTabProducir')?.classList.add('active');
-        $('#conjTabReconocer')?.classList.remove('active');
-        if (!currentP) nextProducir(true);
-      }
-    }
-
-    function pickRandomConj() {
-      const list = dataState.conjugaciones;
-      if (!list?.length) return null;
-      idx = (idx + 1) % list.length;
-      // usamos mezcla estable si quieres más aleatorio:
-      // return list[Math.floor(Math.random() * list.length)];
-      return list[idx];
-    }
-
-    // --------------------
-    // RECONOCER
-    // --------------------
-    function nextReconocer(initial = false) {
-      if (!dataState.conjugaciones.length) return;
-      current = pickRandomConj();
-      const s = $('#conjSentence');
-      const input = $('#conjAnswer');
-
-      if (s) s.textContent = current.frase || '';
-      if (input) input.value = '';
-      if (!initial) {
-        scoreState.total += 1;
-        updateScore();
-      }
-    }
-
-    function onCheckReconocer() {
-      if (!current) return;
-      const input = $('#conjAnswer');
-      const ans = norm(input?.value || '');
-      const sol = norm(current.solucion || '');
-
-      // Permitimos mayúsculas/minúsculas, pero exigimos el texto del verbo tal cual (sin puntos/comas)
-      const ok = ans && ans === sol;
-
-      // Marcador: sumamos intento cuando se comprueba (si aún no se sumó por "next")
-      if (scoreState.total === 0) {
-        scoreState.total = 1;
-      }
-
-      if (ok) {
-        scoreState.ok += 1;
-        updateScore();
-        setFeedback('ok', '✅ <b>¡Correcto!</b>');
-      } else {
-        setFeedback('bad', `❌ <b>No.</b> La respuesta era: <b>${escapeHTML(current.solucion || '')}</b>`);
-      }
-    }
-
-    // --------------------
-    // PRODUCIR (clasificación en 3 pasos)
-    // --------------------
-    function nextProducir(initial = false) {
-      if (!dataState.conjugaciones.length) return;
-      currentP = pickRandomConj();
-
-      // limpiamos selección
-      sel.step1 = null;
-      sel.step2 = null;
-      sel.step3 = null;
-
-      // mostrar forma (solución)
-      const line = $('#prodFormLine');
-      if (line) line.textContent = `Forma: ${currentP.solucion || ''}`;
-
-      renderProdStep1();
-      renderProdStep2();
-      renderProdStep3();
-
-      if (!initial) {
-        scoreState.total += 1;
-        updateScore();
-      }
-    }
-
-    function renderProdStep1() {
-      const box = $('#prodStep1');
-      if (!box) return;
-      const opts = ['Indicativo', 'Subjuntivo', 'Imperativo'];
-
-      box.innerHTML = opts
-        .map((o) => chipHTML(o, sel.step1 === o, `data-step=\"1\" data-val=\"${o}\"`))
-        .join('');
-
-      // listeners
-      $$('button[data-step=\"1\"]', box).forEach((b) => {
-        b.addEventListener('click', () => {
-          sel.step1 = b.getAttribute('data-val');
-          // Si elige Imperativo, forzamos step2/step3 coherentes
-          if (sel.step1 === 'Imperativo') {
-            sel.step2 = null;
-            sel.step3 = 'Imperativo';
-          } else {
-            sel.step3 = null; // recalcular según step2
-          }
-          renderProdStep1();
-          renderProdStep2();
-          renderProdStep3();
-        });
-      });
-    }
-
-    function renderProdStep2() {
-      const box = $('#prodStep2');
-      if (!box) return;
-
-      // Si es imperativo, ocultamos paso 2 (no tiene sentido elegir Presente/Pretérito/etc)
-      if (sel.step1 === 'Imperativo') {
-        box.innerHTML = `<span class=\"hint\">(No aplica en imperativo)</span>`;
-        return;
-      }
-
-      box.innerHTML = STEP2
-        .map((o) => chipHTML(o, sel.step2 === o, `data-step=\"2\" data-val=\"${o}\"`))
-        .join('');
-
-      $$('button[data-step=\"2\"]', box).forEach((b) => {
-        b.addEventListener('click', () => {
-          sel.step2 = b.getAttribute('data-val');
-          // al cambiar step2, reiniciamos step3 y lo re-renderizamos
-          sel.step3 = null;
-          renderProdStep2();
-          renderProdStep3();
-        });
-      });
-    }
-
-    function renderProdStep3() {
-      const box = $('#prodStep3');
-      if (!box) return;
-
-      // Si imperativo:
-      if (sel.step1 === 'Imperativo') {
-        const only = ['Imperativo'];
-        box.innerHTML = only
-          .map((o) => chipHTML(o, sel.step3 === o, `data-step=\"3\" data-val=\"${o}\"`))
-          .join('');
-        $$('button[data-step=\"3\"]', box).forEach((b) => {
-          b.addEventListener('click', () => {
-            sel.step3 = b.getAttribute('data-val');
-            renderProdStep3();
-          });
-        });
-        return;
-      }
-
-      // Dependencia: Step 3 depende de Step 2
-      if (!sel.step2) {
-        box.innerHTML = `<span class=\"hint\">Elige antes el paso 2.</span>`;
-        return;
-      }
-
-      const opts = STEP3_BY_STEP2[sel.step2] || [];
-      box.innerHTML = opts
-        .map((o) => chipHTML(o, sel.step3 === o, `data-step=\"3\" data-val=\"${o}\"`))
-        .join('');
-
-      $$('button[data-step=\"3\"]', box).forEach((b) => {
-        b.addEventListener('click', () => {
-          sel.step3 = b.getAttribute('data-val');
-          renderProdStep3();
-        });
-      });
-    }
-
-    function onCheckProducir() {
-      if (!currentP) return;
-
-      const correctStep1 = String(currentP.modo || '').trim() || null;
-      const correctStep2 = parseStep2(currentP.tiempo, correctStep1);
-      const correctStep3 = parseStep3(currentP.tiempo, correctStep1);
-
-      // Validación mínima: que haya selección
-      if (!sel.step1) {
-        setFeedback('bad', '❌ Elige primero el <b>Modo</b> (paso 1).');
-        return;
-      }
-      if (sel.step1 !== 'Imperativo' && !sel.step2) {
-        setFeedback('bad', '❌ Elige el <b>paso 2</b> (Presente / Pretérito / Futuro / Condicional).');
-        return;
-      }
-      if (!sel.step3) {
-        setFeedback('bad', '❌ Elige el <b>paso 3</b> (tipo exacto).');
-        return;
-      }
-
-      // Comparación
-      const ok1 = sel.step1 === correctStep1;
-      const ok2 = (sel.step1 === 'Imperativo') ? true : (sel.step2 === correctStep2);
-      const ok3 = sel.step3 === correctStep3;
-
-      const ok = ok1 && ok2 && ok3;
-
-      if (ok) {
-        scoreState.ok += 1;
-        updateScore();
-        setFeedback('ok', '✅ <b>¡Correcto!</b>');
-      } else {
-        // mensaje explicativo
-        const parts = [];
-        parts.push(`<b>Modo</b>: ${escapeHTML(correctStep1 || '—')}`);
-        if (correctStep1 !== 'Imperativo') parts.push(`<b>Paso 2</b>: ${escapeHTML(correctStep2 || '—')}`);
-        parts.push(`<b>Tipo</b>: ${escapeHTML(correctStep3 || '—')}`);
-        setFeedback('bad', `❌ <b>No.</b> La clasificación correcta era: ${parts.join(' · ')}`);
-      }
-    }
-
-    // Pequeño helper HTML para chips
-    function chipHTML(label, active, attrs = '') {
-      const cls = active ? 'chip active' : 'chip';
-      return `<button type=\"button\" class=\"${cls}\" ${attrs}>${escapeHTML(label)}</button>`;
-    }
-
-    // export
-    return {
-      initIfNeeded,
-      reset,
-      showTab,
-    };
-  })();
-
-  // ---------------------------
-  // b / v
-  // ---------------------------
-  const BV = (() => {
-    let inited = false;
-    let idx = 0;
-    let current = null;
-
-    function initIfNeeded() {
-      if (inited) return;
-      inited = true;
-      const root = views.bv;
-      if (!root) return;
-
-      root.innerHTML = `
-        <div class="card">
-          <div class="sectionTitle">Uso de b / v</div>
-          <div class="sentence" style="margin-top:10px;">Completa la palabra:</div>
-          <div class="word" id="bvWord">—</div>
-
-          <div class="choices" style="margin-top:10px;">
-            <button class="btn" id="bvB" type="button">b</button>
-            <button class="btn" id="bvV" type="button">v</button>
-            <button class="btn" id="bvNext" type="button">Siguiente</button>
-          </div>
-        </div>
-      `;
-
-      $('#bvB')?.addEventListener('click', () => answer('b'));
-      $('#bvV')?.addEventListener('click', () => answer('v'));
-      $('#bvNext')?.addEventListener('click', () => {
-        setFeedback(null, '');
-        next();
-      });
-    }
-
-    function reset() {
-      idx = 0;
-      current = null;
-      if (inited) $('#bvWord') && ($('#bvWord').textContent = '—');
-    }
-
-    function pick() {
-      const list = dataState.bv;
-      if (!list?.length) return null;
-      idx = (idx + 1) % list.length;
-      return list[idx];
-    }
-
-    function next() {
-      if (!dataState.bv.length) return;
-      current = pick();
-      const el = $('#bvWord');
-      if (el) el.textContent = current?.word ?? '—';
-      scoreState.total += 1;
-      updateScore();
-    }
-
-    function answer(letter) {
-      if (!current) return;
-      const ok = norm(letter) === norm(current?.correct || '');
-      if (ok) {
-        scoreState.ok += 1;
-        updateScore();
-        setFeedback('ok', '✅ <b>¡Correcto!</b>');
-      } else {
-        setFeedback('bad', `❌ <b>No.</b> Era: <b>${escapeHTML(current.correct || '')}</b>`);
-      }
-    }
-
-    return { initIfNeeded, reset, next };
-  })();
-
-  // ---------------------------
-  // Recursos literarios
-  // ---------------------------
-  const Recursos = (() => {
-    let inited = false;
-
-    let mode = 'teoria'; // teoria | practica
-    let idxT = 0;
-    let idxP = 0;
-    let current = null;
-
-    function initIfNeeded() {
-      if (inited) return;
-      inited = true;
-
-      const root = views.recursos;
-      if (!root) return;
-
-      root.innerHTML = `
-        <div class="card">
-          <div style="display:flex; align-items:center; gap:10px; flex-wrap:wrap;">
-            <div class="sectionTitle" style="margin:0;">Recursos literarios</div>
-            <span class="pill" id="recModePill">Teoría</span>
-          </div>
-
-          <div class="choices" style="margin-top:12px;">
-            <button class="chip" id="recModeTeoria" type="button">Teoría</button>
-            <button class="chip" id="recModePractica" type="button">Práctica</button>
-          </div>
-
-          <div class="sentence" id="recPrompt" style="margin-top:14px;">—</div>
-
-          <div class="choices" id="recChoices" style="margin-top:12px;"></div>
-
-          <div style="margin-top:14px; display:flex; justify-content:flex-end;">
-            <button class="btn" id="recNext" type="button">Siguiente</button>
-          </div>
-        </div>
-      `;
-
-      $('#recModeTeoria')?.addEventListener('click', () => showMode('teoria'));
-      $('#recModePractica')?.addEventListener('click', () => showMode('practica'));
-      $('#recNext')?.addEventListener('click', () => {
-        setFeedback(null, '');
-        next();
-      });
-
-      renderChoiceButtons();
-    }
-
-    function reset() {
-      mode = 'teoria';
-      idxT = 0;
-      idxP = 0;
-      current = null;
-      if (inited) {
-        $('#recModePill') && ($('#recModePill').textContent = 'Teoría');
-        $('#recPrompt') && ($('#recPrompt').textContent = '—');
-      }
-    }
-
-    function showMode(m) {
-      mode = m;
-      setFeedback(null, '');
-      $('#recModePill') && ($('#recModePill').textContent = m === 'teoria' ? 'Teoría' : 'Práctica');
-
-      $('#recModeTeoria')?.classList.toggle('active', m === 'teoria');
-      $('#recModePractica')?.classList.toggle('active', m === 'practica');
-
-      next(true);
-    }
-
-    function renderChoiceButtons() {
-      const box = $('#recChoices');
-      if (!box) return;
-      const opts = ['Metáfora', 'Símil', 'Personificación', 'Hipérbole'];
-      box.innerHTML = opts
-        .map((o) => `<button type="button" class="chip" data-rec="${o}">${escapeHTML(o)}</button>`)
-        .join('');
-
-      $$('button[data-rec]', box).forEach((b) => {
-        b.addEventListener('click', () => {
-          const val = b.getAttribute('data-rec');
-          check(val);
-        });
-      });
-    }
-
-    function pickTeoria() {
-      const defs = dataState.recursos?.teoria;
-      if (!defs) return null;
-      const keys = Object.keys(defs);
-      if (!keys.length) return null;
-      idxT = (idxT + 1) % keys.length;
-      const k = keys[idxT];
-      return { type: k, text: defs[k] };
-    }
-
-    function pickPractica() {
-      const ex = dataState.recursos?.ejemplos;
-      if (!ex?.length) return null;
-      idxP = (idxP + 1) % ex.length;
-      const item = ex[idxP];
-      return { type: item.tipo, text: item.texto };
-    }
-
-    function next(initial = false) {
-      if (!dataState.recursos) return;
-
-      current = mode === 'teoria' ? pickTeoria() : pickPractica();
-      if (!current) return;
-
-      const prompt = $('#recPrompt');
-      if (prompt) {
-        prompt.textContent =
-          mode === 'teoria'
-            ? `Definición: ${current.text}`
-            : `Ejemplo: ${current.text}`;
-      }
-
-      if (!initial) {
-        scoreState.total += 1;
-        updateScore();
-      }
-    }
-
-    function check(answer) {
-      if (!current) return;
-      const ok = norm(answer) === norm(current.type);
-      if (ok) {
-        scoreState.ok += 1;
-        updateScore();
-        setFeedback('ok', '✅ <b>¡Correcto!</b>');
-      } else {
-        setFeedback('bad', `❌ <b>No.</b> Era: <b>${escapeHTML(current.type)}</b>`);
-      }
-    }
-
-    return { initIfNeeded, reset, showMode, next };
-  })();
-
-  // ---------------------------
-  // Escapar HTML básico (para feedback)
-  // ---------------------------
-  function escapeHTML(s) {
-    return String(s ?? '')
-      .replaceAll('&', '&amp;')
-      .replaceAll('<', '&lt;')
-      .replaceAll('>', '&gt;')
-      .replaceAll('"', '&quot;')
-      .replaceAll("'", '&#039;');
+      </section>
+    `;
   }
 
-  // ---------------------------
-  // Arranque
-  // ---------------------------
-  async function boot() {
+  function renderBV() {
+    const list = Data.bv || [];
+    if (!list.length) {
+      main.innerHTML = `<section class="card"><h2>Uso de b / v</h2><p>No hay datos cargados.</p></section>`;
+      return;
+    }
+
+    const row = list[State.bvIdx % list.length];
+    const palabra = row.palabra || row.word || row.texto || "";
+    // Se asume que la palabra viene con "_" o "?" como hueco; si no, la mostramos tal cual.
+    main.innerHTML = `
+      <section class="card">
+        <h2>Uso de b / v</h2>
+        <div class="sentence"><b>Completa la palabra:</b> ${escapeHtml(palabra)}</div>
+
+        <div class="choices" style="margin-top:10px">
+          <button class="chip" data-action="bvPick" data-letter="b">b</button>
+          <button class="chip" data-action="bvPick" data-letter="v">v</button>
+          <button class="link" data-action="bvNext">Siguiente</button>
+        </div>
+      </section>
+    `;
+  }
+
+  function renderRecursos() {
+    const list = Data.recursos || [];
+    if (!list.length) {
+      main.innerHTML = `<section class="card"><h2>Recursos literarios</h2><p>No hay datos cargados.</p></section>`;
+      return;
+    }
+
+    const row = list[State.recIdx % list.length];
+    const tipo = row.tipo || row.recurso || row.kind || "";
+    const def = row.definicion || row.def || "";
+    const ejemplo = row.ejemplo || row.texto || row.example || "";
+
+    const modeTabs = `
+      <div class="choices" style="margin-bottom:10px">
+        <button class="${State.recMode === "teoria" ? "chip selected" : "chip"}" data-action="setRecMode" data-mode="teoria">Teoría</button>
+        <button class="${State.recMode === "practica" ? "chip selected" : "chip"}" data-action="setRecMode" data-mode="practica">Práctica</button>
+      </div>
+    `;
+
+    const prompt =
+      State.recMode === "teoria"
+        ? `<div class="sentence">${escapeHtml(def || "(sin definición)")}</div><div class="footerNote">¿Qué recurso es?</div>`
+        : `<div class="sentence">${escapeHtml(ejemplo || "(sin ejemplo)")}</div><div class="footerNote">¿Qué recurso es?</div>`;
+
+    const options = ["Metáfora", "Símil", "Personificación", "Hipérbole"];
+    const optBtns = options
+      .map(o => `<button class="chip" data-action="recPick" data-value="${o}">${o}</button>`)
+      .join("");
+
+    main.innerHTML = `
+      <section class="card">
+        <h2>Recursos literarios</h2>
+        ${modeTabs}
+        ${prompt}
+        <div class="choices" style="margin-top:10px">${optBtns}</div>
+        <div style="margin-top:12px">
+          <button class="link" data-action="recNext">Siguiente</button>
+        </div>
+      </section>
+    `;
+  }
+
+  // ---------- Actions (event delegation) ----------
+  document.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("[data-action]");
+    if (!btn) return;
+    const action = btn.dataset.action;
+
+    // NAV
+    if (action === "nav") {
+      State.view = btn.dataset.to;
+      // reset feedback
+      setFeedback(null, "");
+      render();
+      return;
+    }
+
+    // Conjugaciones: switch mode
+    if (action === "setConjMode") {
+      State.conjMode = btn.dataset.mode;
+      setFeedback(null, "");
+      // reset producing picks when entering producir
+      if (State.conjMode === "producir") {
+        State.prodPick = { modo: null, grupo: null, exacto: null };
+      }
+      render();
+      return;
+    }
+
+    // Producing: pick buttons (modo/grupo/exacto)
+    if (action === "pick") {
+      const key = btn.dataset.key;
+      const value = btn.dataset.value;
+
+      if (State.conjMode !== "producir") return;
+
+      if (key === "modo") {
+        State.prodPick.modo = value;
+        // si cambia el modo: reset grupo y exacto
+        State.prodPick.grupo = null;
+        State.prodPick.exacto = null;
+
+        // si es imperativo, forzamos grupo=Presente y exacto queda en null hasta que elija
+        if (value === "Imperativo") {
+          State.prodPick.grupo = "Presente";
+          State.prodPick.exacto = null;
+        }
+      }
+
+      if (key === "grupo") {
+        State.prodPick.grupo = value;
+        // al cambiar grupo: reset exacto
+        State.prodPick.exacto = null;
+      }
+
+      if (key === "exacto") {
+        State.prodPick.exacto = value;
+      }
+
+      setFeedback(null, "");
+      render();
+      return;
+    }
+
+    // Conjugaciones: check verb (reconocer)
+    if (action === "checkVerb") {
+      const list = Data.conjugaciones || [];
+      const row = list[State.conjIdx % list.length];
+
+      const input = $("#verbInput");
+      const user = (input?.value ?? "").trim();
+      State.conjUserVerb = user;
+
+      const expected = getVerbAnswerFromRow(row);
+
+      if (!user) {
+        setFeedback("bad", "Escribe algo primero.");
+        return;
+      }
+
+      if (eqLoose(user, expected)) {
+        setFeedback("ok", "¡Correcto!");
+      } else {
+        setFeedback("bad", `No. La respuesta era: "${expected}"`);
+      }
+      return;
+    }
+
+    if (action === "nextConj") {
+      State.conjIdx = (State.conjIdx + 1) % (Data.conjugaciones?.length || 1);
+      State.conjUserVerb = "";
+      setFeedback(null, "");
+      render();
+      return;
+    }
+
+    // Conjugaciones: check producir (3 pasos)
+    if (action === "checkProducir") {
+      const list = Data.conjugaciones || [];
+      const row = list[State.conjIdx % list.length];
+
+      const expected = expected3StepsFromRow(row);
+      const pick = State.prodPick;
+
+      // Validaciones
+      if (!pick.modo) return setFeedback("bad", "Elige el paso 1 (Modo).");
+      if (!pick.grupo) return setFeedback("bad", "Elige el paso 2.");
+      if (!pick.exacto) return setFeedback("bad", "Elige el paso 3.");
+
+      const ok1 = pick.modo === expected.modo;
+      const ok2 = pick.grupo === expected.grupo;
+      const ok3 = pick.exacto === expected.exacto;
+
+      if (ok1 && ok2 && ok3) {
+        setFeedback("ok", "¡Correcto!");
+      } else {
+        setFeedback(
+          "bad",
+          `No. Era: ${expected.modo} / ${expected.grupo ?? "?"} / ${expected.exacto ?? "?"}`
+        );
+      }
+      return;
+    }
+
+    if (action === "nextProducir") {
+      State.conjIdx = (State.conjIdx + 1) % (Data.conjugaciones?.length || 1);
+      State.prodPick = { modo: null, grupo: null, exacto: null };
+      setFeedback(null, "");
+      render();
+      return;
+    }
+
+    // b/v
+    if (action === "bvPick") {
+      const list = Data.bv || [];
+      const row = list[State.bvIdx % list.length];
+
+      const expected = row.correcta || row.correct || row.letra || "";
+      const picked = btn.dataset.letter;
+
+      if (eqLoose(picked, expected)) setFeedback("ok", "¡Correcto!");
+      else setFeedback("bad", `No. Era: "${expected}"`);
+      return;
+    }
+    if (action === "bvNext") {
+      State.bvIdx = (State.bvIdx + 1) % (Data.bv?.length || 1);
+      setFeedback(null, "");
+      render();
+      return;
+    }
+
+    // recursos
+    if (action === "setRecMode") {
+      State.recMode = btn.dataset.mode;
+      setFeedback(null, "");
+      render();
+      return;
+    }
+    if (action === "recPick") {
+      const list = Data.recursos || [];
+      const row = list[State.recIdx % list.length];
+
+      const expected = row.tipo || row.recurso || row.kind || "";
+      const picked = btn.dataset.value;
+
+      if (eqLoose(picked, expected)) setFeedback("ok", "¡Correcto!");
+      else setFeedback("bad", `No. Era: "${expected}"`);
+      return;
+    }
+    if (action === "recNext") {
+      State.recIdx = (State.recIdx + 1) % (Data.recursos?.length || 1);
+      setFeedback(null, "");
+      render();
+      return;
+    }
+  });
+
+  // Keep input synced (reconocer)
+  document.addEventListener("input", (ev) => {
+    const t = ev.target;
+    if (t && t.id === "verbInput") {
+      State.conjUserVerb = t.value;
+    }
+  });
+
+  // ---------- Init ----------
+  async function init() {
     try {
-      // Cargamos JSON (mismos paths que tenías en sw.js)
-      const [conj, bv, rec] = await Promise.all([
-        loadJSON('./data/conjugaciones.json'),
-        loadJSON('./data/bv.json'),
-        loadJSON('./data/recursos.json'),
-      ]);
-
-      dataState.conjugaciones = Array.isArray(conj) ? conj : [];
-      dataState.bv = Array.isArray(bv) ? bv : [];
-      dataState.recursos = rec || null;
-
-      // Wire UI
-      wireHomeButtons();
-      wireFooter();
-
-      // Estado inicial
-      showView('home');
-      updateScore();
-      setModeTitle('');
-
-      // Inicializa módulos “lazy” cuando se entra, pero creamos estructuras si ya están
-      // (no es obligatorio aquí)
-    } catch (err) {
-      console.error(err);
-      setFeedback('bad', `❌ Error cargando datos: ${escapeHTML(err.message)}`);
-      updateScore();
-      showView('home');
+      await loadAll();
+    } catch (e) {
+      console.error(e);
+      setFeedback("bad", String(e.message || e));
     }
+
+    // Header simple (si existe)
+    if (header) {
+      header.innerHTML = `
+        <div class="brand">
+          <h1>Lengua</h1>
+          <div class="subtitle" id="subtitle">Elige qué estudiar</div>
+        </div>
+        <button class="link" data-action="nav" data-to="home">Inicio</button>
+      `;
+    }
+
+    render();
   }
 
-  boot();
+  window.addEventListener("DOMContentLoaded", init);
 })();
