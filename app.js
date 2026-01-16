@@ -1,475 +1,474 @@
-/* Lengua — Pablo (app.js)
-   - Navegación por vistas con .view / .view.active
-   - 3 módulos: conjugaciones, b/v, recursos
-*/
-
 const PATHS = {
   conjugaciones: "data/conjugaciones.json",
   bv: "data/bv.json",
   recursos: "data/recursos.json",
 };
 
-// Helpers DOM
+const VERSION = (window.APP_VERSION || "dev");
+
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 
-function showFeedback(msg, kind = "ok") {
-  const el = $("#feedback");
-  if (!el) return;
-  el.classList.remove("hidden");
-  el.classList.toggle("ok", kind === "ok");
-  el.classList.toggle("bad", kind === "bad");
-  el.textContent = msg;
-  clearTimeout(showFeedback._t);
-  showFeedback._t = setTimeout(() => el.classList.add("hidden"), 1800);
-}
-
-// Normalización (sin tildes, sin mayúsculas, espacios colapsados)
 function stripDiacritics(s) {
   return String(s ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
-function norm(s) {
+function normalizeAnswer(s) {
   return stripDiacritics(s).trim().replace(/\s+/g, " ").toLowerCase();
 }
-
 function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
-
-async function loadJSON(path) {
-  // Cache-bust suave para GitHub Pages
-  const url = `${path}?v=${Date.now()}`;
-  const r = await fetch(url, { cache: "no-store" });
-  if (!r.ok) throw new Error(`No se pudo cargar ${path} (${r.status})`);
-  return r.json();
+function getField(obj, ...keys) {
+  for (const k of keys) {
+    if (obj && obj[k] != null && String(obj[k]).trim() !== "") return obj[k];
+  }
+  return "";
+}
+async function loadJson(path) {
+  const url = `${path}?v=${encodeURIComponent(VERSION)}`;
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`No se pudo cargar ${url} (${res.status})`);
+  return res.json();
 }
 
-/* ----------------- Navegación ----------------- */
-function setView(id) {
-  $$(".view").forEach(v => v.classList.remove("active"));
-  const el = document.getElementById(id);
-  if (el) el.classList.add("active");
+function show(el, on) {
+  if (!el) return;
+  el.classList.toggle("hidden", !on);
 }
 
-function bindNav() {
-  $("#homeConj")?.addEventListener("click", () => { setView("conjugaciones"); conj.ensureLoaded().then(() => conj.next()); });
-  $("#homeBV")?.addEventListener("click", () => { setView("bv"); bv.ensureLoaded().then(() => bv.next()); });
-  $("#homeRec")?.addEventListener("click", () => { setView("recursos"); rec.ensureLoaded().then(() => rec.next()); });
+function setFeedback(el, msg, ok) {
+  if (!el) return;
+  el.textContent = msg;
+  el.classList.remove("hidden");
+  el.classList.toggle("ok", !!ok);
+  el.classList.toggle("bad", !ok);
+}
 
-  $("#btn-home")?.addEventListener("click", () => setView("home"));
-  $("#btn-ready")?.addEventListener("click", () => setView("home"));
+function clearFeedback(el) {
+  if (!el) return;
+  el.classList.add("hidden");
+  el.textContent = "";
+  el.classList.remove("ok", "bad");
+}
 
-  $("#btn-reset")?.addEventListener("click", () => {
-    appScore.reset();
-    showFeedback("Marcador reiniciado", "ok");
-    conj.reset();
-    bv.reset();
-    rec.reset();
-    appScore.render();
+function setSelected(groupEl, value) {
+  if (!groupEl) return;
+  groupEl.querySelectorAll("button").forEach((b) => {
+    b.classList.toggle("selected", b.dataset.value === value);
   });
 }
 
-const appScore = {
-  ok: 0,
-  total: 0,
-  add(isOk) {
-    this.total += 1;
-    if (isOk) this.ok += 1;
-    this.render();
-  },
-  reset() { this.ok = 0; this.total = 0; this.render(); },
-  render() {
-    const el = $("#score");
-    if (el) el.textContent = `Aciertos: ${this.ok} / ${this.total}`;
-  }
-};
-
-/* ----------------- Conjugaciones ----------------- */
-/* Formato tolerante:
-   - Reconocer: esperamos items con { sentence, answer } o { frase, respuesta } etc.
-   - Producir: items con { forma, modo, grupo, tipo } o variantes.
-*/
-const conj = {
-  data: null,
-  mode: "reconocer", // reconocer | producir
-  current: null,
-
-  scoreOk: 0,
-  scoreTot: 0,
-
-  async ensureLoaded() {
-    if (this.data) return;
-    const raw = await loadJSON(PATHS.conjugaciones);
-
-    // Acepta array o {items:[...]}
-    const items = Array.isArray(raw) ? raw : (raw.items || raw.data || []);
-    this.data = items;
-
-    // UI bindings (una vez)
-    this.bindUI();
-  },
-
-  bindUI() {
-    $("#conjModeRecon")?.addEventListener("click", () => this.setMode("reconocer"));
-    $("#conjModeProd")?.addEventListener("click", () => this.setMode("producir"));
-
-    $("#conjCheck")?.addEventListener("click", () => this.checkRecon());
-    $("#conjInput")?.addEventListener("keydown", (e) => {
-      if (e.key === "Enter") this.checkRecon();
-    });
-    $("#conjNext")?.addEventListener("click", () => this.next());
-
-    $("#prodCheck")?.addEventListener("click", () => this.checkProd());
-    $("#prodNext")?.addEventListener("click", () => this.next());
-  },
-
-  reset() {
-    this.scoreOk = 0;
-    this.scoreTot = 0;
-    $("#conjScore") && ($("#conjScore").textContent = "");
-    $("#prodScore") && ($("#prodScore").textContent = "");
-  },
-
-  setMode(m) {
-    this.mode = m;
-    const reconUI = $("#conjReconUI");
-    const prodUI = $("#conjProdUI");
-    if (m === "reconocer") {
-      reconUI?.classList.remove("hidden");
-      prodUI?.classList.add("hidden");
-      showFeedback("Modo: Reconocer", "ok");
-    } else {
-      reconUI?.classList.add("hidden");
-      prodUI?.classList.remove("hidden");
-      showFeedback("Modo: Producir", "ok");
-    }
-    this.next();
-  },
-
-  getField(obj, ...keys) {
-    for (const k of keys) {
-      const v = obj?.[k];
-      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
-    }
-    return "";
-  },
-
-  next() {
-    if (!this.data || this.data.length === 0) {
-      $("#conjSentence").textContent = "No hay datos de conjugaciones.";
-      return;
-    }
-
-    this.current = pickRandom(this.data);
-
-    if (this.mode === "reconocer") {
-      const sentence = this.getField(this.current, "sentence", "frase", "texto", "oracion");
-      $("#conjSentence").textContent = sentence || "(sin frase en el JSON)";
-
-      $("#conjInput").value = "";
-      $("#conjHint").textContent = "";
-      $("#conjScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
-      return;
-    }
-
-    // PRODUCIR (clasificar forma)
-    const forma = this.getField(this.current, "forma", "form", "conjugacion", "respuesta", "answer");
-    $("#prodForm").textContent = forma ? forma : "(sin forma en el JSON)";
-    $("#conjSentence").textContent = ""; // en producir no mostramos frase
-
-    // Opciones fijas
-    this.prodSel = { modo: null, grupo: null, tipo: null };
-
-    renderChips("#prodStep1", ["Indicativo", "Subjuntivo", "Imperativo"], (v) => {
-      this.prodSel.modo = v;
-      markSelected("#prodStep1", v);
-    });
-
-    renderChips("#prodStep2", ["Presente", "Pretérito", "Futuro", "Condicional"], (v) => {
-      this.prodSel.grupo = v;
-      markSelected("#prodStep2", v);
-      this.renderStep3(v);
-    });
-
-    // Step3 empieza vacío hasta elegir step2
-    $("#prodStep3").innerHTML = `<span class="muted">Elige antes el paso 2.</span>`;
-    $("#prodScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
-  },
-
-  renderStep3(grupo) {
-    const wrap = $("#prodStep3");
-    if (!wrap) return;
-
-    let opts = [];
-    if (grupo === "Presente") {
-      // como tú pediste: o no hay step3 o se queda “Presente simple”
-      opts = ["Presente simple"];
-    } else if (grupo === "Pretérito") {
-      opts = [
-        "Pretérito imperfecto",
-        "Pretérito perfecto simple",
-        "Pretérito perfecto compuesto",
-        "Pretérito pluscuamperfecto",
-        "Pretérito anterior",
-      ];
-    } else if (grupo === "Futuro") {
-      opts = ["Futuro simple", "Futuro compuesto"];
-    } else if (grupo === "Condicional") {
-      opts = ["Condicional simple", "Condicional compuesto"];
-    }
-
-    this.prodSel.tipo = null;
-    renderChips("#prodStep3", opts, (v) => {
-      this.prodSel.tipo = v;
-      markSelected("#prodStep3", v);
-    });
-  },
-
-  checkRecon() {
-    const expected = this.getField(this.current, "answer", "respuesta", "verbo", "solucion");
-    const user = $("#conjInput").value;
-
-    const ok = norm(user) === norm(expected);
-
-    this.scoreTot += 1;
-    if (ok) this.scoreOk += 1;
-
-    appScore.add(ok);
-    $("#conjHint").textContent = ok ? "✅ ¡Correcto!" : `❌ No. La respuesta era: "${expected}"`;
-    $("#conjScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
-  },
-
-  checkProd() {
-    // En esta versión, el “check” de producir valida SOLO que haya elegido los 3 pasos
-    // (porque no sabemos tu esquema exacto del JSON para comparar modo/grupo/tipo).
-    // Cuando me pegues 2-3 entradas reales de conjugaciones.json lo conectamos a datos.
-    const { modo, grupo, tipo } = this.prodSel || {};
-    const ok = Boolean(modo && grupo && (grupo === "Presente" ? true : tipo));
-
-    this.scoreTot += 1;
-    if (ok) this.scoreOk += 1;
-    appScore.add(ok);
-
-    $("#prodScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
-    showFeedback(ok ? "¡Clasificación guardada!" : "Faltan pasos por elegir", ok ? "ok" : "bad");
-  }
-};
-
-/* ----------------- b/v ----------------- */
-/* Formatos aceptados en bv.json:
-   - "vi_ir" (string con hueco)
-   - { pattern:"vi_ir", answer:"v" }
-   - { word:"vivir", missing:"v", index:0 } -> crea patrón con "_"
-   - { word:"vivir", answer:"v" } -> intenta inferir primer b/v
-*/
-const bv = {
-  data: null,
-  current: null,
-  scoreOk: 0,
-  scoreTot: 0,
-
-  async ensureLoaded() {
-    if (this.data) return;
-    const raw = await loadJSON(PATHS.bv);
-    const items = Array.isArray(raw) ? raw : (raw.items || raw.data || []);
-    this.data = items;
-    this.bindUI();
-  },
-
-  bindUI() {
-    $("#bvB")?.addEventListener("click", () => this.answer("b"));
-    $("#bvV")?.addEventListener("click", () => this.answer("v"));
-    $("#bvNext")?.addEventListener("click", () => this.next());
-  },
-
-  reset() {
-    this.scoreOk = 0;
-    this.scoreTot = 0;
-    $("#bvScore") && ($("#bvScore").textContent = "");
-  },
-
-  toBVItem(x) {
-    // string pattern
-    if (typeof x === "string") {
-      return { pattern: x, answer: x.includes("_") ? null : null };
-    }
-
-    const pattern = x.pattern || x.patron || x.text || x.display || "";
-    const word = x.word || x.palabra || "";
-    let ans = (x.answer || x.respuesta || x.correct || x.letra || "").toLowerCase();
-
-    // Si ya trae pattern con hueco
-    if (pattern && pattern.includes("_")) {
-      // intenta obtener answer si viene
-      return { pattern, answer: ans || null, word: word || null };
-    }
-
-    // Si trae word + missing/index
-    if (word) {
-      const idx = Number.isInteger(x.index) ? x.index : Number.isInteger(x.pos) ? x.pos : null;
-      const missing = (x.missing || x.letra || "").toLowerCase();
-
-      if (idx !== null && missing) {
-        const patt = word.slice(0, idx) + "_" + word.slice(idx + 1);
-        return { pattern: patt, answer: missing, word };
-      }
-
-      // Si trae word + answer (sin index): inferir primera b/v del word
-      if (ans && (ans === "b" || ans === "v")) {
-        const i = word.toLowerCase().indexOf(ans);
-        if (i >= 0) {
-          const patt = word.slice(0, i) + "_" + word.slice(i + 1);
-          return { pattern: patt, answer: ans, word };
-        }
-      }
-
-      // último recurso: si tiene b o v, hueco en la primera aparición
-      const wl = word.toLowerCase();
-      const iB = wl.indexOf("b");
-      const iV = wl.indexOf("v");
-      const i = (iB >= 0 && iV >= 0) ? Math.min(iB, iV) : Math.max(iB, iV);
-      if (i >= 0) {
-        const correct = wl[i];
-        const patt = word.slice(0, i) + "_" + word.slice(i + 1);
-        return { pattern: patt, answer: correct, word };
-      }
-
-      return { pattern: word, answer: null, word };
-    }
-
-    return { pattern: "(sin palabra en el JSON)", answer: null, word: null };
-  },
-
-  next() {
-    if (!this.data || this.data.length === 0) {
-      $("#bvWord").textContent = "No hay datos de b/v.";
-      return;
-    }
-    this.current = this.toBVItem(pickRandom(this.data));
-    $("#bvWord").textContent = this.current.pattern || "(sin patrón)";
-    $("#bvScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
-  },
-
-  answer(letter) {
-    if (!this.current) return;
-
-    // Si no tenemos answer, no podemos corregir -> solo avanza
-    const exp = this.current.answer;
-    const ok = exp ? (letter === exp) : true;
-
-    this.scoreTot += 1;
-    if (ok) this.scoreOk += 1;
-
-    appScore.add(ok);
-    showFeedback(ok ? "¡Correcto!" : `No. Era "${exp}"`, ok ? "ok" : "bad");
-
-    $("#bvScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
-  }
-};
-
-/* ----------------- Recursos literarios ----------------- */
-/* Formatos aceptados:
-   - { prompt, options:[...], answer:"Metáfora" }
-   - { pregunta, opciones:[...], correcta:"..." }
-*/
-const rec = {
-  data: null,
-  current: null,
-  scoreOk: 0,
-  scoreTot: 0,
-
-  async ensureLoaded() {
-    if (this.data) return;
-    const raw = await loadJSON(PATHS.recursos);
-    const items = Array.isArray(raw) ? raw : (raw.items || raw.data || []);
-    this.data = items;
-    this.bindUI();
-  },
-
-  bindUI() {
-    $("#recNext")?.addEventListener("click", () => this.next());
-  },
-
-  reset() {
-    this.scoreOk = 0;
-    this.scoreTot = 0;
-    $("#recScore") && ($("#recScore").textContent = "");
-  },
-
-  getField(obj, ...keys) {
-    for (const k of keys) {
-      const v = obj?.[k];
-      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
-    }
-    return "";
-  },
-
-  next() {
-    if (!this.data || this.data.length === 0) {
-      $("#recPrompt").textContent = "No hay datos de recursos literarios.";
-      $("#recButtons").innerHTML = "";
-      return;
-    }
-
-    this.current = pickRandom(this.data);
-
-    const prompt = this.getField(this.current, "prompt", "pregunta", "texto", "enunciado");
-    const options = this.current.options || this.current.opciones || this.current.choices || [];
-    const answer = this.getField(this.current, "answer", "correcta", "solucion", "respuesta");
-
-    $("#recPrompt").textContent = prompt || "(sin pregunta en el JSON)";
-
-    const wrap = $("#recButtons");
-    wrap.innerHTML = "";
-
-    (Array.isArray(options) ? options : []).forEach(opt => {
-      const b = document.createElement("button");
-      b.className = "chip";
-      b.textContent = opt;
-      b.addEventListener("click", () => {
-        const ok = norm(opt) === norm(answer);
-
-        this.scoreTot += 1;
-        if (ok) this.scoreOk += 1;
-        appScore.add(ok);
-
-        showFeedback(ok ? "¡Correcto!" : `No. Era: "${answer}"`, ok ? "ok" : "bad");
-        $("#recScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
-      });
-      wrap.appendChild(b);
-    });
-
-    $("#recScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
-  }
-};
-
-/* UI helpers for “chips” seleccionables */
-function renderChips(containerSel, values, onPick) {
-  const wrap = $(containerSel);
-  if (!wrap) return;
-  wrap.innerHTML = "";
-  values.forEach(v => {
-    const b = document.createElement("button");
-    b.className = "chip";
-    b.textContent = v;
-    b.addEventListener("click", () => onPick(v));
-    wrap.appendChild(b);
+function buildChoiceButtons(container, values, onPick) {
+  container.innerHTML = "";
+  values.forEach((v) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip";
+    btn.textContent = v;
+    btn.dataset.value = v;
+    btn.addEventListener("click", () => onPick(v));
+    container.appendChild(btn);
   });
 }
 
-function markSelected(containerSel, value) {
-  const wrap = $(containerSel);
-  if (!wrap) return;
-  Array.from(wrap.querySelectorAll("button")).forEach(btn => {
-    btn.classList.toggle("primary", btn.textContent === value);
+/* ---------------- Views ---------------- */
+const views = {
+  home: $("#viewHome"),
+  conj: $("#viewConj"),
+  bv: $("#viewBV"),
+  rec: $("#viewRec"),
+};
+
+function go(viewName) {
+  Object.entries(views).forEach(([k, el]) => {
+    el.classList.toggle("active", k === viewName);
   });
 }
 
-/* Boot */
-window.addEventListener("DOMContentLoaded", () => {
-  bindNav();
-  appScore.render();
-  setView("home");
+/* ---------------- Global Score ---------------- */
+const score = {
+  totalOk: 0,
+  totalAll: 0,
+
+  conjOk: 0, conjAll: 0,
+  bvOk: 0, bvAll: 0,
+  recOk: 0, recAll: 0,
+};
+
+function renderScores() {
+  $("#globalScore").textContent = `Aciertos: ${score.totalOk} / ${score.totalAll}`;
+  $("#conjScore").textContent = `Aciertos: ${score.conjOk} / ${score.conjAll}`;
+  $("#bvScore").textContent = `Aciertos: ${score.bvOk} / ${score.bvAll}`;
+  $("#recScore").textContent = `Aciertos: ${score.recOk} / ${score.recAll}`;
+}
+
+/* ---------------- HOME wiring ---------------- */
+$("#homeConj").addEventListener("click", () => { go("conj"); conjStart(); });
+$("#homeBV").addEventListener("click", () => { go("bv"); bvStart(); });
+$("#homeRec").addEventListener("click", () => { go("rec"); recStart(); });
+
+$("#btnHome").addEventListener("click", () => go("home"));
+$("#btnListo").addEventListener("click", () => go("home"));
+
+$("#btnReset").addEventListener("click", () => {
+  score.totalOk = score.totalAll = 0;
+  score.conjOk = score.conjAll = 0;
+  score.bvOk = score.bvAll = 0;
+  score.recOk = score.recAll = 0;
+  renderScores();
 });
+
+/* ---------------- CONJUGACIONES ---------------- */
+let conjData = null;
+
+let conjMode = "recon"; // recon | prod
+let conjCurrentRecon = null;
+
+let prodCurrent = null;
+let prodSel = { modo:"", grupo:"", tipo:"", persona:"", numero:"" };
+
+const conjReconBox = $("#conjReconBox");
+const conjProdBox = $("#conjProdBox");
+
+function conjSetMode(mode) {
+  conjMode = mode;
+  show(conjReconBox, mode === "recon");
+  show(conjProdBox, mode === "prod");
+
+  $("#conjTabRecon").classList.toggle("selected", mode === "recon");
+  $("#conjTabProd").classList.toggle("selected", mode === "prod");
+
+  if (mode === "recon") conjNextRecon();
+  else prodNext();
+}
+
+$("#conjTabRecon").addEventListener("click", () => conjSetMode("recon"));
+$("#conjTabProd").addEventListener("click", () => conjSetMode("prod"));
+
+async function conjStart() {
+  try {
+    if (!conjData) conjData = await loadJson(PATHS.conjugaciones);
+  } catch (e) {
+    alert(`Error cargando conjugaciones.json: ${e.message}`);
+    return;
+  }
+  conjSetMode(conjMode);
+  renderScores();
+}
+
+function conjPickReconItem() {
+  // Acepta que el JSON sea un array o {items:[...]}
+  const arr = Array.isArray(conjData) ? conjData : (conjData.items || conjData.reconocer || []);
+  return pickRandom(arr);
+}
+
+function conjNextRecon() {
+  clearFeedback($("#conjFeedback"));
+  const item = conjPickReconItem();
+  conjCurrentRecon = item;
+
+  const sentence = getField(item, "frase", "sentence", "texto");
+  $("#conjSentence").textContent = sentence || "(frase no encontrada en el JSON)";
+
+  $("#conjInput").value = "";
+  $("#conjInput").focus();
+}
+
+$("#conjNext").addEventListener("click", conjNextRecon);
+
+$("#conjCheck").addEventListener("click", () => {
+  const expected = getField(conjCurrentRecon, "solucion", "answer", "verbo", "forma");
+  const user = $("#conjInput").value;
+
+  const ok = normalizeAnswer(user) === normalizeAnswer(expected);
+
+  score.totalAll++; score.conjAll++;
+  if (ok) { score.totalOk++; score.conjOk++; }
+
+  setFeedback(
+    $("#conjFeedback"),
+    ok ? "¡Correcto!" : `No. La respuesta era: "${expected}"`,
+    ok
+  );
+
+  renderScores();
+});
+
+/* ----- Producir / clasificar ----- */
+
+function conjPickProdItem() {
+  // Reutiliza el mismo JSON: si no hay sección específica, elige elementos que tengan "forma"
+  const arr = Array.isArray(conjData) ? conjData : (conjData.producir || conjData.items || []);
+  // Filtra candidatos con forma (o solucion/answer)
+  const candidates = arr.filter(x => getField(x, "forma", "solucion", "answer"));
+  return candidates.length ? pickRandom(candidates) : pickRandom(arr);
+}
+
+function prodBuildTipoOptions(grupo) {
+  // Grupo en el paso 2: Presente / Pretérito / Futuro / Condicional
+  if (grupo === "Presente") return ["Presente"];
+  if (grupo === "Futuro") return ["Futuro simple", "Futuro compuesto"];
+  if (grupo === "Condicional") return ["Condicional simple", "Condicional compuesto"];
+  if (grupo === "Pretérito") {
+    return [
+      "Imperfecto",
+      "Perfecto simple",
+      "Perfecto compuesto",
+      "Pluscuamperfecto",
+      "Pretérito anterior",
+    ];
+  }
+  return [];
+}
+
+function prodResetSelections() {
+  prodSel = { modo:"", grupo:"", tipo:"", persona:"", numero:"" };
+  ["#prodModo","#prodGrupo","#prodTipo","#prodPersona","#prodNumero"].forEach(sel => {
+    const el = $(sel);
+    if (el) el.querySelectorAll("button").forEach(b => b.classList.remove("selected"));
+  });
+}
+
+function prodRenderChoices() {
+  // 1) Modo
+  buildChoiceButtons($("#prodModo"), ["Indicativo","Subjuntivo","Imperativo"], (v) => {
+    prodSel.modo = v;
+    setSelected($("#prodModo"), v);
+  });
+
+  // 2) Grupo
+  buildChoiceButtons($("#prodGrupo"), ["Presente","Pretérito","Futuro","Condicional"], (v) => {
+    prodSel.grupo = v;
+    setSelected($("#prodGrupo"), v);
+
+    // Al cambiar grupo, rehacer Tipo (3)
+    prodSel.tipo = "";
+    const tipos = prodBuildTipoOptions(v);
+    buildChoiceButtons($("#prodTipo"), tipos, (t) => {
+      prodSel.tipo = t;
+      setSelected($("#prodTipo"), t);
+    });
+  });
+
+  // 3) Tipo empieza vacío hasta elegir grupo
+  $("#prodTipo").innerHTML = `<span class="muted">Elige antes el paso 2.</span>`;
+
+  // Persona / número
+  buildChoiceButtons($("#prodPersona"), ["1ª","2ª","3ª"], (v) => {
+    prodSel.persona = v;
+    setSelected($("#prodPersona"), v);
+  });
+  buildChoiceButtons($("#prodNumero"), ["Singular","Plural"], (v) => {
+    prodSel.numero = v;
+    setSelected($("#prodNumero"), v);
+  });
+}
+
+function prodNext() {
+  clearFeedback($("#prodFeedback"));
+  prodResetSelections();
+  prodRenderChoices();
+
+  prodCurrent = conjPickProdItem();
+
+  // “forma” es lo que se muestra para clasificar
+  const forma = getField(prodCurrent, "forma", "solucion", "answer");
+  $("#prodForma").textContent = forma || "(sin forma en el JSON)";
+}
+
+$("#prodNext").addEventListener("click", prodNext);
+
+function normalizeLabel(s) {
+  return String(s || "").trim();
+}
+
+$("#prodCheck").addEventListener("click", () => {
+  // Esperados desde JSON (si existen). Si no existen, no podemos corregir: avisamos.
+  const exp = {
+    modo: normalizeLabel(getField(prodCurrent, "modo")),
+    grupo: normalizeLabel(getField(prodCurrent, "grupo", "tiempo", "grupoTiempo")),
+    tipo: normalizeLabel(getField(prodCurrent, "tipo", "subtipo")),
+    persona: normalizeLabel(getField(prodCurrent, "persona")),
+    numero: normalizeLabel(getField(prodCurrent, "numero")),
+  };
+
+  // Si el JSON no tiene metadatos, no hay forma fiable de corregir
+  const hasMeta = Object.values(exp).some(v => v);
+  if (!hasMeta) {
+    setFeedback(
+      $("#prodFeedback"),
+      "Este ítem no tiene modo/tiempo/persona/número en el JSON, así que no se puede corregir. (Añade esos campos en conjugaciones.json).",
+      false
+    );
+    return;
+  }
+
+  // Reglas del paso 3: si grupo es Presente, tipo debe ser Presente (o vacío)
+  let ok =
+    (!exp.modo || prodSel.modo === exp.modo) &&
+    (!exp.grupo || prodSel.grupo === exp.grupo) &&
+    (!exp.tipo || prodSel.tipo === exp.tipo) &&
+    (!exp.persona || prodSel.persona === exp.persona) &&
+    (!exp.numero || prodSel.numero === exp.numero);
+
+  score.totalAll++; score.conjAll++;
+  if (ok) { score.totalOk++; score.conjOk++; }
+
+  setFeedback(
+    $("#prodFeedback"),
+    ok ? "¡Correcto!" : `No. Esperado: ${JSON.stringify(exp)}`,
+    ok
+  );
+  renderScores();
+});
+
+/* ---------------- BV ---------------- */
+let bvData = null;
+let bvCurrent = null;
+
+async function bvStart() {
+  try {
+    if (!bvData) bvData = await loadJson(PATHS.bv);
+  } catch (e) {
+    alert(`Error cargando bv.json: ${e.message}`);
+    return;
+  }
+  bvNext();
+  renderScores();
+}
+
+function bvMaskFromItem(item) {
+  // Soporta varias formas:
+  // 1) {masked:"b_scar", pick:"b", correct:"buscar"}
+  // 2) {word:"buscar", missing:"b"} -> "_uscar"
+  // 3) {texto:"b_scar", correcta:"buscar"} etc.
+  const masked = getField(item, "masked", "texto", "mask");
+  const correct = getField(item, "correct", "correcta", "word", "palabra");
+  const missing = getField(item, "pick", "missing", "letra");
+
+  if (masked) {
+    return {
+      masked,
+      pick: missing || (masked.includes("_") ? null : null),
+      correct: correct || "",
+    };
+  }
+
+  if (correct && missing) {
+    const m = correct.replace(new RegExp(missing, "i"), "_");
+    return { masked: m, pick: missing.toLowerCase(), correct };
+  }
+
+  // fallback: si solo hay word, no se puede
+  return { masked: correct || "(sin datos)", pick: "", correct: correct || "" };
+}
+
+function bvNext() {
+  clearFeedback($("#bvFeedback"));
+  const arr = Array.isArray(bvData) ? bvData : (bvData.items || []);
+  bvCurrent = pickRandom(arr);
+
+  const info = bvMaskFromItem(bvCurrent);
+  $("#bvWord").textContent = info.masked;
+}
+
+$("#bvNext").addEventListener("click", bvNext);
+
+function bvAnswer(letter) {
+  const info = bvMaskFromItem(bvCurrent);
+  const expectedLetter = (info.pick || "").toLowerCase();
+
+  // Si no hay expectedLetter, intentamos deducirlo comparando masked->correct
+  let exp = expectedLetter;
+  if (!exp && info.masked.includes("_") && info.correct) {
+    // buscamos la letra que llena el hueco
+    const i = info.masked.indexOf("_");
+    exp = info.correct[i]?.toLowerCase() || "";
+  }
+
+  const ok = letter.toLowerCase() === exp;
+
+  score.totalAll++; score.bvAll++;
+  if (ok) { score.totalOk++; score.bvOk++; }
+
+  setFeedback(
+    $("#bvFeedback"),
+    ok ? "¡Correcto!" : `No. Era "${exp}".`,
+    ok
+  );
+  renderScores();
+}
+
+$("#bvB").addEventListener("click", () => bvAnswer("b"));
+$("#bvV").addEventListener("click", () => bvAnswer("v"));
+
+/* ---------------- RECURSOS ---------------- */
+let recData = null;
+let recCurrent = null;
+
+async function recStart() {
+  try {
+    if (!recData) recData = await loadJson(PATHS.recursos);
+  } catch (e) {
+    alert(`Error cargando recursos.json: ${e.message}`);
+    return;
+  }
+  recNext();
+  renderScores();
+}
+
+function recNext() {
+  clearFeedback($("#recFeedback"));
+
+  const arr = Array.isArray(recData) ? recData : (recData.items || recData.recursos || []);
+  recCurrent = pickRandom(arr);
+
+  const text = getField(recCurrent, "texto", "frase", "sentence");
+  $("#recText").textContent = text || "(texto no encontrado en el JSON)";
+
+  const options =
+    recCurrent.opciones ||
+    recCurrent.options ||
+    recCurrent.choices ||
+    [];
+
+  const correct = getField(recCurrent, "correcta", "correct", "answer");
+
+  const box = $("#recButtons");
+  box.innerHTML = "";
+
+  if (!options.length) {
+    box.innerHTML = `<span class="muted">No hay opciones en recursos.json (campo "opciones").</span>`;
+    return;
+  }
+
+  options.forEach((opt) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.className = "chip";
+    b.textContent = opt;
+    b.addEventListener("click", () => {
+      const ok = normalizeAnswer(opt) === normalizeAnswer(correct);
+
+      score.totalAll++; score.recAll++;
+      if (ok) { score.totalOk++; score.recOk++; }
+
+      setFeedback(
+        $("#recFeedback"),
+        ok ? "¡Correcto!" : `No. Era "${correct}".`,
+        ok
+      );
+
+      renderScores();
+    });
+    box.appendChild(b);
+  });
+}
+
+$("#recNext").addEventListener("click", recNext);
+
+/* ---------------- Boot ---------------- */
+go("home");
+renderScores();
