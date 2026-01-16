@@ -1,639 +1,475 @@
-/* =============================
-   Lengua — Pablo (app.js)
-   - Vistas: #home, #conjugaciones, #bv, #recursos  (clase .view / .active)
-   - Botones home: #homeConj, #homeBV, #homeRec
-   - Footer: #btn-home, #btn-reset, #score
-   - Conjugaciones:
-       #conjSentence, #conjInput, #conjCheck, #conjNext,
-       #conjHint, #conjClassify
-   - BV:
-       #bvWord, #bvReveal, #bvB, #bvV, #bvNext
-   - Recursos:
-       #recMode, #recTheory, #recPractice, #recPrompt,
-       #recButtons, #recNext
-============================= */
-
-const APP_VERSION = "2026-01-16-2248"; // cambia esto si quieres forzar recarga
+/* Lengua — Pablo (app.js)
+   - Navegación por vistas con .view / .view.active
+   - 3 módulos: conjugaciones, b/v, recursos
+*/
 
 const PATHS = {
-  conjugaciones: `data/conjugaciones.json?v=${APP_VERSION}`,
-  bv: `data/bv.json?v=${APP_VERSION}`,
-  recursos: `data/recursos.json?v=${APP_VERSION}`,
+  conjugaciones: "data/conjugaciones.json",
+  bv: "data/bv.json",
+  recursos: "data/recursos.json",
 };
 
+// Helpers DOM
 const $ = (s) => document.querySelector(s);
 const $$ = (s) => Array.from(document.querySelectorAll(s));
 
-/* ---------- Normalización (sin tildes / mayúsculas) ---------- */
+function showFeedback(msg, kind = "ok") {
+  const el = $("#feedback");
+  if (!el) return;
+  el.classList.remove("hidden");
+  el.classList.toggle("ok", kind === "ok");
+  el.classList.toggle("bad", kind === "bad");
+  el.textContent = msg;
+  clearTimeout(showFeedback._t);
+  showFeedback._t = setTimeout(() => el.classList.add("hidden"), 1800);
+}
+
+// Normalización (sin tildes, sin mayúsculas, espacios colapsados)
 function stripDiacritics(s) {
   return String(s ?? "")
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "");
 }
-function normalizeAnswer(s) {
+function norm(s) {
   return stripDiacritics(s).trim().replace(/\s+/g, " ").toLowerCase();
 }
+
 function pickRandom(arr) {
   return arr[Math.floor(Math.random() * arr.length)];
 }
-function getField(obj, ...keys) {
-  for (const k of keys) {
-    if (obj && obj[k] != null && String(obj[k]).trim() !== "") return obj[k];
+
+async function loadJSON(path) {
+  // Cache-bust suave para GitHub Pages
+  const url = `${path}?v=${Date.now()}`;
+  const r = await fetch(url, { cache: "no-store" });
+  if (!r.ok) throw new Error(`No se pudo cargar ${path} (${r.status})`);
+  return r.json();
+}
+
+/* ----------------- Navegación ----------------- */
+function setView(id) {
+  $$(".view").forEach(v => v.classList.remove("active"));
+  const el = document.getElementById(id);
+  if (el) el.classList.add("active");
+}
+
+function bindNav() {
+  $("#homeConj")?.addEventListener("click", () => { setView("conjugaciones"); conj.ensureLoaded().then(() => conj.next()); });
+  $("#homeBV")?.addEventListener("click", () => { setView("bv"); bv.ensureLoaded().then(() => bv.next()); });
+  $("#homeRec")?.addEventListener("click", () => { setView("recursos"); rec.ensureLoaded().then(() => rec.next()); });
+
+  $("#btn-home")?.addEventListener("click", () => setView("home"));
+  $("#btn-ready")?.addEventListener("click", () => setView("home"));
+
+  $("#btn-reset")?.addEventListener("click", () => {
+    appScore.reset();
+    showFeedback("Marcador reiniciado", "ok");
+    conj.reset();
+    bv.reset();
+    rec.reset();
+    appScore.render();
+  });
+}
+
+const appScore = {
+  ok: 0,
+  total: 0,
+  add(isOk) {
+    this.total += 1;
+    if (isOk) this.ok += 1;
+    this.render();
+  },
+  reset() { this.ok = 0; this.total = 0; this.render(); },
+  render() {
+    const el = $("#score");
+    if (el) el.textContent = `Aciertos: ${this.ok} / ${this.total}`;
   }
-  return "";
-}
-
-/* ---------- Fetch robusto (evita caché) ---------- */
-async function fetchJSON(url) {
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`HTTP ${res.status} al cargar ${url}`);
-  return await res.json();
-}
-
-/* ---------- Estado global ---------- */
-const state = {
-  view: "home",
-  score: { ok: 0, total: 0 },
-
-  data: {
-    conj: [],
-    bv: [],
-    rec: [],
-  },
-
-  // Conjugaciones
-  conj: {
-    mode: "reconocer", // reconocer | producir
-    current: null,
-    phase: "answer", // answer | classify (según modo)
-    classify: {
-      modo: null, // Indicativo/Subjuntivo/Imperativo
-      grupo: null, // Presente/Pretérito/Futuro/Condicional
-      tipo: null, // depende del grupo
-    },
-  },
-
-  // BV
-  bv: {
-    current: null,
-    revealed: false,
-  },
-
-  // Recursos
-  rec: {
-    current: null,
-  },
 };
 
-/* ---------- UI helpers ---------- */
-function showFeedback(msg, kind = "ok") {
-  const el = $("#feedback");
-  if (!el) return;
-  el.style.display = "block";
-  el.classList.remove("ok", "bad");
-  el.classList.add(kind === "ok" ? "ok" : "bad");
-  el.textContent = msg;
-}
-function hideFeedback() {
-  const el = $("#feedback");
-  if (!el) return;
-  el.style.display = "none";
-  el.textContent = "";
-}
-function updateScore() {
-  const el = $("#score");
-  if (!el) return;
-  el.textContent = `Aciertos: ${state.score.ok} / ${state.score.total}`;
-}
-function setView(viewId) {
-  state.view = viewId;
-  $$(".view").forEach((v) => v.classList.remove("active"));
-  const target = $("#" + viewId);
-  if (target) target.classList.add("active");
-  hideFeedback();
-}
-function incTotal() {
-  state.score.total += 1;
-  updateScore();
-}
-function incOK() {
-  state.score.ok += 1;
-  updateScore();
-}
-function resetScore() {
-  state.score.ok = 0;
-  state.score.total = 0;
-  updateScore();
-}
+/* ----------------- Conjugaciones ----------------- */
+/* Formato tolerante:
+   - Reconocer: esperamos items con { sentence, answer } o { frase, respuesta } etc.
+   - Producir: items con { forma, modo, grupo, tipo } o variantes.
+*/
+const conj = {
+  data: null,
+  mode: "reconocer", // reconocer | producir
+  current: null,
 
-/* ============================================================
-   INIT
-============================================================ */
-async function init() {
-  wireNav();
+  scoreOk: 0,
+  scoreTot: 0,
 
-  try {
-    const [conj, bv, rec] = await Promise.all([
-      fetchJSON(PATHS.conjugaciones).catch(() => []),
-      fetchJSON(PATHS.bv).catch(() => []),
-      fetchJSON(PATHS.recursos).catch(() => []),
-    ]);
+  async ensureLoaded() {
+    if (this.data) return;
+    const raw = await loadJSON(PATHS.conjugaciones);
 
-    state.data.conj = Array.isArray(conj) ? conj : (conj.items ?? conj.data ?? []);
-    state.data.bv = Array.isArray(bv) ? bv : (bv.items ?? bv.data ?? []);
-    state.data.rec = Array.isArray(rec) ? rec : (rec.items ?? rec.data ?? []);
+    // Acepta array o {items:[...]}
+    const items = Array.isArray(raw) ? raw : (raw.items || raw.data || []);
+    this.data = items;
 
-  } catch (e) {
-    // si algo peta, no tumbamos toda la app
-    console.warn(e);
-  }
+    // UI bindings (una vez)
+    this.bindUI();
+  },
 
-  updateScore();
-  setView("home");
-}
+  bindUI() {
+    $("#conjModeRecon")?.addEventListener("click", () => this.setMode("reconocer"));
+    $("#conjModeProd")?.addEventListener("click", () => this.setMode("producir"));
 
-function wireNav() {
-  // Home buttons
-  $("#homeConj")?.addEventListener("click", () => {
-    setView("conjugaciones");
-    startConjugaciones();
-  });
-  $("#homeBV")?.addEventListener("click", () => {
-    setView("bv");
-    startBV();
-  });
-  $("#homeRec")?.addEventListener("click", () => {
-    setView("recursos");
-    startRecursos();
-  });
-
-  // Footer
-  $("#btn-home")?.addEventListener("click", () => setView("home"));
-  $("#btn-reset")?.addEventListener("click", () => {
-    resetScore();
-    hideFeedback();
-  });
-}
-
-/* ============================================================
-   CONJUGACIONES
-   - Dos modos:
-     1) Reconocer: frase -> extraer forma verbal (como ya tenías)
-     2) Producir: sale una forma (del JSON) y Pablo la clasifica en 3 pasos
-============================================================ */
-
-function startConjugaciones() {
-  // Por defecto dejamos el modo que ya tuvieses marcado en UI, si existe
-  renderConjModeButtons();
-  nextConjItem();
-  renderConjugaciones();
-}
-
-function renderConjModeButtons() {
-  const btnRec = $("#conjModeRec");
-  const btnProd = $("#conjModeProd");
-
-  // si no existen, no pasa nada (tu HTML puede no tenerlos)
-  btnRec?.addEventListener("click", () => {
-    state.conj.mode = "reconocer";
-    state.conj.phase = "answer";
-    hideFeedback();
-    renderConjModeButtons();
-    nextConjItem();
-    renderConjugaciones();
-  });
-  btnProd?.addEventListener("click", () => {
-    state.conj.mode = "producir";
-    state.conj.phase = "classify";
-    hideFeedback();
-    renderConjModeButtons();
-    nextConjItem();
-    renderConjugaciones();
-  });
-
-  // estado visual (si tu CSS usa .selected)
-  if (btnRec) btnRec.classList.toggle("selected", state.conj.mode === "reconocer");
-  if (btnProd) btnProd.classList.toggle("selected", state.conj.mode === "producir");
-}
-
-function nextConjItem() {
-  const arr = state.data.conj;
-  if (!arr || arr.length === 0) {
-    state.conj.current = null;
-    return;
-  }
-  state.conj.current = pickRandom(arr);
-  state.conj.classify = { modo: null, grupo: null, tipo: null };
-  state.conj.phase = state.conj.mode === "reconocer" ? "answer" : "classify";
-}
-
-function renderConjugaciones() {
-  const item = state.conj.current;
-
-  const sentenceEl = $("#conjSentence");
-  const inputEl = $("#conjInput");
-  const checkBtn = $("#conjCheck");
-  const nextBtn = $("#conjNext");
-  const hintBtn = $("#conjHint");
-  const classifyBox = $("#conjClassify");
-
-  if (!item) {
-    sentenceEl && (sentenceEl.textContent = "No hay datos en conjugaciones.json");
-    classifyBox && (classifyBox.innerHTML = "");
-    return;
-  }
-
-  // Reconocer: frase + input; Producir: mostrar forma y clasificar
-  const sentence =
-    getField(item, "frase", "sentence", "texto", "text") ||
-    getField(item, "prompt", "enunciado") ||
-    "";
-
-  const expected =
-    getField(item, "verbo", "respuesta", "answer", "target", "forma") || "";
-
-  const form =
-    getField(item, "forma", "form", "conjugacion", "conjugated") || expected;
-
-  if (state.conj.mode === "reconocer") {
-    // UI reconocer
-    if (sentenceEl) sentenceEl.textContent = sentence || "(sin frase en el JSON)";
-    if (inputEl) {
-      inputEl.value = "";
-      inputEl.style.display = "inline-block";
-    }
-    checkBtn && (checkBtn.style.display = "inline-block");
-    hintBtn && (hintBtn.style.display = "inline-block");
-    nextBtn && (nextBtn.style.display = "inline-block");
-    if (classifyBox) classifyBox.style.display = "none";
-
-    checkBtn?.onclick = () => {
-      const user = normalizeAnswer(inputEl?.value || "");
-      const ok = normalizeAnswer(user) === normalizeAnswer(expected);
-      incTotal();
-      if (ok) {
-        incOK();
-        showFeedback("¡Correcto!", "ok");
-      } else {
-        showFeedback(`No. La respuesta era: "${expected}"`, "bad");
-      }
-    };
-
-    hintBtn?.onclick = () => {
-      if (expected) showFeedback(`Pista: empieza por "${expected.slice(0, 2)}..."`, "ok");
-    };
-
-    nextBtn?.onclick = () => {
-      hideFeedback();
-      nextConjItem();
-      renderConjugaciones();
-    };
-
-    return;
-  }
-
-  // Modo PRODUCIR (clasificación 3 pasos)
-  if (sentenceEl) sentenceEl.textContent = `Forma: ${form || "(sin forma en el JSON)"}`;
-
-  // ocultamos input de reconocer
-  if (inputEl) inputEl.style.display = "none";
-  checkBtn && (checkBtn.style.display = "none");
-  hintBtn && (hintBtn.style.display = "none");
-
-  if (classifyBox) {
-    classifyBox.style.display = "block";
-    classifyBox.innerHTML = buildConjClassifyUI();
-    wireConjClassifyHandlers();
-  }
-
-  nextBtn?.onclick = () => {
-    hideFeedback();
-    nextConjItem();
-    renderConjugaciones();
-  };
-}
-
-function buildConjClassifyUI() {
-  // Paso 2 SIEMPRE: Presente / Pretérito / Futuro / Condicional (como has pedido)
-  // Paso 3 DEPENDE de Paso 2
-  const modo = state.conj.classify.modo;
-  const grupo = state.conj.classify.grupo;
-  const tipo = state.conj.classify.tipo;
-
-  const btn = (id, label, active) =>
-    `<button type="button" class="pill ${active ? "selected" : ""}" data-pick="${id}">${label}</button>`;
-
-  const modoRow = [
-    btn("modo:Indicativo", "Indicativo", modo === "Indicativo"),
-    btn("modo:Subjuntivo", "Subjuntivo", modo === "Subjuntivo"),
-    btn("modo:Imperativo", "Imperativo", modo === "Imperativo"),
-  ].join("");
-
-  const grupoRow = [
-    btn("grupo:Presente", "Presente", grupo === "Presente"),
-    btn("grupo:Pretérito", "Pretérito", grupo === "Pretérito"),
-    btn("grupo:Futuro", "Futuro", grupo === "Futuro"),
-    btn("grupo:Condicional", "Condicional", grupo === "Condicional"),
-  ].join("");
-
-  let tipoRow = "";
-  if (grupo === "Presente") {
-    // como pediste: puede no haber 3) o quedarse “Presente simple”
-    tipoRow = btn("tipo:Presente simple", "Presente simple", tipo === "Presente simple");
-  } else if (grupo === "Pretérito") {
-    tipoRow = [
-      btn("tipo:Perfecto simple", "Perfecto simple", tipo === "Perfecto simple"),
-      btn("tipo:Perfecto compuesto", "Perfecto compuesto", tipo === "Perfecto compuesto"),
-      btn("tipo:Imperfecto", "Imperfecto", tipo === "Imperfecto"),
-      btn("tipo:Pluscuamperfecto", "Pluscuamperfecto", tipo === "Pluscuamperfecto"),
-      btn("tipo:Anterior", "Anterior", tipo === "Anterior"),
-    ].join("");
-  } else if (grupo === "Futuro") {
-    tipoRow = [
-      btn("tipo:Futuro simple", "Futuro simple", tipo === "Futuro simple"),
-      btn("tipo:Futuro compuesto", "Futuro compuesto", tipo === "Futuro compuesto"),
-    ].join("");
-  } else if (grupo === "Condicional") {
-    tipoRow = [
-      btn("tipo:Condicional simple", "Condicional simple", tipo === "Condicional simple"),
-      btn("tipo:Condicional compuesto", "Condicional compuesto", tipo === "Condicional compuesto"),
-    ].join("");
-  } else {
-    tipoRow = `<div class="muted">Elige antes el paso 2.</div>`;
-  }
-
-  return `
-    <div class="muted">Clasifica esta forma en 3 pasos.</div>
-
-    <div class="step">
-      <div class="stepTitle">1) Modo</div>
-      <div class="pillRow">${modoRow}</div>
-    </div>
-
-    <div class="step">
-      <div class="stepTitle">2) Tiempo (grupo)</div>
-      <div class="pillRow">${grupoRow}</div>
-    </div>
-
-    <div class="step">
-      <div class="stepTitle">3) Tipo exacto</div>
-      <div class="pillRow">${tipoRow}</div>
-    </div>
-
-    <div class="row">
-      <button type="button" class="btn" id="conjProdCheck">Comprobar</button>
-    </div>
-  `;
-}
-
-function wireConjClassifyHandlers() {
-  const box = $("#conjClassify");
-  if (!box) return;
-
-  box.querySelectorAll("[data-pick]").forEach((b) => {
-    b.addEventListener("click", () => {
-      const [k, v] = b.dataset.pick.split(":");
-      if (k === "modo") state.conj.classify.modo = v;
-      if (k === "grupo") {
-        state.conj.classify.grupo = v;
-        state.conj.classify.tipo = null; // MUY IMPORTANTE: tipo depende del grupo
-      }
-      if (k === "tipo") state.conj.classify.tipo = v;
-
-      // re-render para que se vea seleccionado y cambie el paso 3
-      renderConjugaciones();
+    $("#conjCheck")?.addEventListener("click", () => this.checkRecon());
+    $("#conjInput")?.addEventListener("keydown", (e) => {
+      if (e.key === "Enter") this.checkRecon();
     });
-  });
+    $("#conjNext")?.addEventListener("click", () => this.next());
 
-  box.querySelector("#conjProdCheck")?.addEventListener("click", () => {
-    const item = state.conj.current;
-    if (!item) return;
+    $("#prodCheck")?.addEventListener("click", () => this.checkProd());
+    $("#prodNext")?.addEventListener("click", () => this.next());
+  },
 
-    // Intentamos leer del JSON la “verdad”.
-    // Si no existe en tu JSON, no marcamos mal: avisamos.
-    const truthModo = getField(item, "modo", "mode");
-    const truthGrupo = getField(item, "grupo", "tiempoGrupo", "grupoTiempo");
-    const truthTipo = getField(item, "tipo", "tiempo", "tenseExacto", "exact");
+  reset() {
+    this.scoreOk = 0;
+    this.scoreTot = 0;
+    $("#conjScore") && ($("#conjScore").textContent = "");
+    $("#prodScore") && ($("#prodScore").textContent = "");
+  },
 
-    if (!truthModo || !truthGrupo || !truthTipo) {
-      showFeedback("No puedo corregir porque faltan campos (modo/grupo/tipo) en conjugaciones.json.", "bad");
+  setMode(m) {
+    this.mode = m;
+    const reconUI = $("#conjReconUI");
+    const prodUI = $("#conjProdUI");
+    if (m === "reconocer") {
+      reconUI?.classList.remove("hidden");
+      prodUI?.classList.add("hidden");
+      showFeedback("Modo: Reconocer", "ok");
+    } else {
+      reconUI?.classList.add("hidden");
+      prodUI?.classList.remove("hidden");
+      showFeedback("Modo: Producir", "ok");
+    }
+    this.next();
+  },
+
+  getField(obj, ...keys) {
+    for (const k of keys) {
+      const v = obj?.[k];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+    }
+    return "";
+  },
+
+  next() {
+    if (!this.data || this.data.length === 0) {
+      $("#conjSentence").textContent = "No hay datos de conjugaciones.";
       return;
     }
 
-    const ok =
-      normalizeAnswer(state.conj.classify.modo) === normalizeAnswer(truthModo) &&
-      normalizeAnswer(state.conj.classify.grupo) === normalizeAnswer(truthGrupo) &&
-      normalizeAnswer(state.conj.classify.tipo) === normalizeAnswer(truthTipo);
+    this.current = pickRandom(this.data);
 
-    incTotal();
-    if (ok) {
-      incOK();
-      showFeedback("¡Correcto!", "ok");
-    } else {
-      showFeedback(
-        `No. Era: ${truthModo} / ${truthGrupo} / ${truthTipo}`,
-        "bad"
-      );
+    if (this.mode === "reconocer") {
+      const sentence = this.getField(this.current, "sentence", "frase", "texto", "oracion");
+      $("#conjSentence").textContent = sentence || "(sin frase en el JSON)";
+
+      $("#conjInput").value = "";
+      $("#conjHint").textContent = "";
+      $("#conjScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
+      return;
     }
-  });
-}
 
-/* ============================================================
-   BV
-   - Arregla el “sale resuelta”: SIEMPRE mostramos hueco.
-   - Soporta varios formatos de JSON:
-     A) { prompt:"bu_car", answer:"buscar", correct:"s" }
-     B) { palabra:"buscar", correcta:"b", pos:0 }
-     C) { word:"vivir", correct:"v" } (inferimos posición)
-============================================================ */
+    // PRODUCIR (clasificar forma)
+    const forma = this.getField(this.current, "forma", "form", "conjugacion", "respuesta", "answer");
+    $("#prodForm").textContent = forma ? forma : "(sin forma en el JSON)";
+    $("#conjSentence").textContent = ""; // en producir no mostramos frase
 
-function startBV() {
-  nextBV();
-  renderBV();
-}
+    // Opciones fijas
+    this.prodSel = { modo: null, grupo: null, tipo: null };
 
-function nextBV() {
-  const arr = state.data.bv;
-  if (!arr || arr.length === 0) {
-    state.bv.current = null;
-    return;
-  }
-  state.bv.current = pickRandom(arr);
-  state.bv.revealed = false;
-}
-
-function maskBVWord(word, correctLetter, pos) {
-  const w = String(word || "");
-  if (!w) return "";
-
-  // si viene una “plantilla” con "_" o "?" ya está lista
-  if (w.includes("_") || w.includes("?")) return w;
-
-  const letter = String(correctLetter || "").toLowerCase();
-  let idx = Number.isFinite(pos) ? pos : -1;
-
-  if (idx < 0 && (letter === "b" || letter === "v")) {
-    // buscamos primera ocurrencia de la letra correcta
-    idx = w.toLowerCase().indexOf(letter);
-  }
-  if (idx < 0) {
-    // si no se puede inferir, intentamos encontrar cualquier b/v y ocultarla
-    const ib = w.toLowerCase().indexOf("b");
-    const iv = w.toLowerCase().indexOf("v");
-    idx = Math.min(...[ib, iv].filter((x) => x >= 0));
-  }
-  if (idx < 0) return w; // sin b/v, devolvemos tal cual
-
-  return w.slice(0, idx) + "_" + w.slice(idx + 1);
-}
-
-function renderBV() {
-  const item = state.bv.current;
-  const wordEl = $("#bvWord");
-  const revealEl = $("#bvReveal");
-  const btnB = $("#bvB");
-  const btnV = $("#bvV");
-  const btnNext = $("#bvNext");
-
-  if (!item) {
-    wordEl && (wordEl.textContent = "No hay datos en bv.json");
-    return;
-  }
-
-  const full =
-    getField(item, "answer", "palabra", "word", "solucion", "correctWord") || "";
-
-  const prompt =
-    getField(item, "prompt", "hueco", "masked", "plantilla") || "";
-
-  const correct =
-    String(getField(item, "correct", "correcta", "letra", "letter") || "").toLowerCase();
-
-  const posRaw = getField(item, "pos", "idx", "index");
-  const pos = posRaw === "" ? NaN : Number(posRaw);
-
-  const display = prompt || maskBVWord(full, correct, pos);
-
-  if (wordEl) wordEl.textContent = display ? display : "(sin palabra en bv.json)";
-
-  if (revealEl) revealEl.style.display = "none";
-
-  btnB?.addEventListener("click", () => checkBV("b", full, correct));
-  btnV?.addEventListener("click", () => checkBV("v", full, correct));
-  btnNext?.addEventListener("click", () => {
-    hideFeedback();
-    nextBV();
-    renderBV();
-  });
-}
-
-function checkBV(pick, full, correct) {
-  // si el JSON no trae “correct”, lo inferimos mirando si la palabra tiene b o v en el hueco (pero puede fallar)
-  let truth = correct;
-  if (truth !== "b" && truth !== "v") {
-    // inferencia: si contiene b y no v, b; si contiene v y no b, v; si ambas, no se puede
-    const wb = normalizeAnswer(full).includes("b");
-    const wv = normalizeAnswer(full).includes("v");
-    truth = wb && !wv ? "b" : wv && !wb ? "v" : "";
-  }
-
-  incTotal();
-  if (!truth) {
-    showFeedback("No puedo corregir porque bv.json no indica cuál es la letra correcta (b/v).", "bad");
-    return;
-  }
-
-  if (pick === truth) {
-    incOK();
-    showFeedback("¡Correcto!", "ok");
-  } else {
-    showFeedback(`No. Era "${truth}".`, "bad");
-  }
-}
-
-/* ============================================================
-   RECURSOS LITERARIOS
-   - Elimina el placeholder y muestra ejercicio real si hay datos
-   - Soporta formatos:
-     A) { texto, opciones:[...], correcta }
-     B) { prompt, choices:[...], answer }
-============================================================ */
-
-function startRecursos() {
-  nextRecurso();
-  renderRecursos();
-}
-
-function nextRecurso() {
-  const arr = state.data.rec;
-  if (!arr || arr.length === 0) {
-    state.rec.current = null;
-    return;
-  }
-  state.rec.current = pickRandom(arr);
-}
-
-function renderRecursos() {
-  const item = state.rec.current;
-  const promptEl = $("#recPrompt");
-  const buttonsEl = $("#recButtons");
-  const nextBtn = $("#recNext");
-
-  if (!promptEl || !buttonsEl) return;
-
-  if (!item) {
-    promptEl.textContent = "No hay datos en recursos.json";
-    buttonsEl.innerHTML = "";
-    nextBtn?.addEventListener("click", () => {});
-    return;
-  }
-
-  const prompt = getField(item, "texto", "prompt", "frase", "text") || "(sin texto)";
-  const options =
-    getField(item, "opciones", "choices", "options") || [];
-
-  const correct = getField(item, "correcta", "answer", "correct", "solution");
-
-  promptEl.textContent = prompt;
-
-  const opts = Array.isArray(options) ? options : [];
-  if (opts.length === 0) {
-    buttonsEl.innerHTML =
-      `<div class="muted">recursos.json cargado, pero no trae "opciones/choices".</div>`;
-  } else {
-    buttonsEl.innerHTML = opts
-      .map((o, i) => `<button type="button" class="pill" data-rec="${i}">${o}</button>`)
-      .join("");
-    buttonsEl.querySelectorAll("[data-rec]").forEach((b) => {
-      b.addEventListener("click", () => {
-        const i = Number(b.dataset.rec);
-        const picked = opts[i];
-
-        if (!correct) {
-          showFeedback("No puedo corregir porque recursos.json no indica la respuesta correcta.", "bad");
-          return;
-        }
-
-        incTotal();
-        const ok = normalizeAnswer(picked) === normalizeAnswer(correct);
-        if (ok) {
-          incOK();
-          showFeedback("¡Correcto!", "ok");
-        } else {
-          showFeedback(`No. Era: ${correct}`, "bad");
-        }
-      });
+    renderChips("#prodStep1", ["Indicativo", "Subjuntivo", "Imperativo"], (v) => {
+      this.prodSel.modo = v;
+      markSelected("#prodStep1", v);
     });
-  }
 
-  nextBtn?.addEventListener("click", () => {
-    hideFeedback();
-    nextRecurso();
-    renderRecursos();
+    renderChips("#prodStep2", ["Presente", "Pretérito", "Futuro", "Condicional"], (v) => {
+      this.prodSel.grupo = v;
+      markSelected("#prodStep2", v);
+      this.renderStep3(v);
+    });
+
+    // Step3 empieza vacío hasta elegir step2
+    $("#prodStep3").innerHTML = `<span class="muted">Elige antes el paso 2.</span>`;
+    $("#prodScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
+  },
+
+  renderStep3(grupo) {
+    const wrap = $("#prodStep3");
+    if (!wrap) return;
+
+    let opts = [];
+    if (grupo === "Presente") {
+      // como tú pediste: o no hay step3 o se queda “Presente simple”
+      opts = ["Presente simple"];
+    } else if (grupo === "Pretérito") {
+      opts = [
+        "Pretérito imperfecto",
+        "Pretérito perfecto simple",
+        "Pretérito perfecto compuesto",
+        "Pretérito pluscuamperfecto",
+        "Pretérito anterior",
+      ];
+    } else if (grupo === "Futuro") {
+      opts = ["Futuro simple", "Futuro compuesto"];
+    } else if (grupo === "Condicional") {
+      opts = ["Condicional simple", "Condicional compuesto"];
+    }
+
+    this.prodSel.tipo = null;
+    renderChips("#prodStep3", opts, (v) => {
+      this.prodSel.tipo = v;
+      markSelected("#prodStep3", v);
+    });
+  },
+
+  checkRecon() {
+    const expected = this.getField(this.current, "answer", "respuesta", "verbo", "solucion");
+    const user = $("#conjInput").value;
+
+    const ok = norm(user) === norm(expected);
+
+    this.scoreTot += 1;
+    if (ok) this.scoreOk += 1;
+
+    appScore.add(ok);
+    $("#conjHint").textContent = ok ? "✅ ¡Correcto!" : `❌ No. La respuesta era: "${expected}"`;
+    $("#conjScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
+  },
+
+  checkProd() {
+    // En esta versión, el “check” de producir valida SOLO que haya elegido los 3 pasos
+    // (porque no sabemos tu esquema exacto del JSON para comparar modo/grupo/tipo).
+    // Cuando me pegues 2-3 entradas reales de conjugaciones.json lo conectamos a datos.
+    const { modo, grupo, tipo } = this.prodSel || {};
+    const ok = Boolean(modo && grupo && (grupo === "Presente" ? true : tipo));
+
+    this.scoreTot += 1;
+    if (ok) this.scoreOk += 1;
+    appScore.add(ok);
+
+    $("#prodScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
+    showFeedback(ok ? "¡Clasificación guardada!" : "Faltan pasos por elegir", ok ? "ok" : "bad");
+  }
+};
+
+/* ----------------- b/v ----------------- */
+/* Formatos aceptados en bv.json:
+   - "vi_ir" (string con hueco)
+   - { pattern:"vi_ir", answer:"v" }
+   - { word:"vivir", missing:"v", index:0 } -> crea patrón con "_"
+   - { word:"vivir", answer:"v" } -> intenta inferir primer b/v
+*/
+const bv = {
+  data: null,
+  current: null,
+  scoreOk: 0,
+  scoreTot: 0,
+
+  async ensureLoaded() {
+    if (this.data) return;
+    const raw = await loadJSON(PATHS.bv);
+    const items = Array.isArray(raw) ? raw : (raw.items || raw.data || []);
+    this.data = items;
+    this.bindUI();
+  },
+
+  bindUI() {
+    $("#bvB")?.addEventListener("click", () => this.answer("b"));
+    $("#bvV")?.addEventListener("click", () => this.answer("v"));
+    $("#bvNext")?.addEventListener("click", () => this.next());
+  },
+
+  reset() {
+    this.scoreOk = 0;
+    this.scoreTot = 0;
+    $("#bvScore") && ($("#bvScore").textContent = "");
+  },
+
+  toBVItem(x) {
+    // string pattern
+    if (typeof x === "string") {
+      return { pattern: x, answer: x.includes("_") ? null : null };
+    }
+
+    const pattern = x.pattern || x.patron || x.text || x.display || "";
+    const word = x.word || x.palabra || "";
+    let ans = (x.answer || x.respuesta || x.correct || x.letra || "").toLowerCase();
+
+    // Si ya trae pattern con hueco
+    if (pattern && pattern.includes("_")) {
+      // intenta obtener answer si viene
+      return { pattern, answer: ans || null, word: word || null };
+    }
+
+    // Si trae word + missing/index
+    if (word) {
+      const idx = Number.isInteger(x.index) ? x.index : Number.isInteger(x.pos) ? x.pos : null;
+      const missing = (x.missing || x.letra || "").toLowerCase();
+
+      if (idx !== null && missing) {
+        const patt = word.slice(0, idx) + "_" + word.slice(idx + 1);
+        return { pattern: patt, answer: missing, word };
+      }
+
+      // Si trae word + answer (sin index): inferir primera b/v del word
+      if (ans && (ans === "b" || ans === "v")) {
+        const i = word.toLowerCase().indexOf(ans);
+        if (i >= 0) {
+          const patt = word.slice(0, i) + "_" + word.slice(i + 1);
+          return { pattern: patt, answer: ans, word };
+        }
+      }
+
+      // último recurso: si tiene b o v, hueco en la primera aparición
+      const wl = word.toLowerCase();
+      const iB = wl.indexOf("b");
+      const iV = wl.indexOf("v");
+      const i = (iB >= 0 && iV >= 0) ? Math.min(iB, iV) : Math.max(iB, iV);
+      if (i >= 0) {
+        const correct = wl[i];
+        const patt = word.slice(0, i) + "_" + word.slice(i + 1);
+        return { pattern: patt, answer: correct, word };
+      }
+
+      return { pattern: word, answer: null, word };
+    }
+
+    return { pattern: "(sin palabra en el JSON)", answer: null, word: null };
+  },
+
+  next() {
+    if (!this.data || this.data.length === 0) {
+      $("#bvWord").textContent = "No hay datos de b/v.";
+      return;
+    }
+    this.current = this.toBVItem(pickRandom(this.data));
+    $("#bvWord").textContent = this.current.pattern || "(sin patrón)";
+    $("#bvScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
+  },
+
+  answer(letter) {
+    if (!this.current) return;
+
+    // Si no tenemos answer, no podemos corregir -> solo avanza
+    const exp = this.current.answer;
+    const ok = exp ? (letter === exp) : true;
+
+    this.scoreTot += 1;
+    if (ok) this.scoreOk += 1;
+
+    appScore.add(ok);
+    showFeedback(ok ? "¡Correcto!" : `No. Era "${exp}"`, ok ? "ok" : "bad");
+
+    $("#bvScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
+  }
+};
+
+/* ----------------- Recursos literarios ----------------- */
+/* Formatos aceptados:
+   - { prompt, options:[...], answer:"Metáfora" }
+   - { pregunta, opciones:[...], correcta:"..." }
+*/
+const rec = {
+  data: null,
+  current: null,
+  scoreOk: 0,
+  scoreTot: 0,
+
+  async ensureLoaded() {
+    if (this.data) return;
+    const raw = await loadJSON(PATHS.recursos);
+    const items = Array.isArray(raw) ? raw : (raw.items || raw.data || []);
+    this.data = items;
+    this.bindUI();
+  },
+
+  bindUI() {
+    $("#recNext")?.addEventListener("click", () => this.next());
+  },
+
+  reset() {
+    this.scoreOk = 0;
+    this.scoreTot = 0;
+    $("#recScore") && ($("#recScore").textContent = "");
+  },
+
+  getField(obj, ...keys) {
+    for (const k of keys) {
+      const v = obj?.[k];
+      if (v !== undefined && v !== null && String(v).trim() !== "") return v;
+    }
+    return "";
+  },
+
+  next() {
+    if (!this.data || this.data.length === 0) {
+      $("#recPrompt").textContent = "No hay datos de recursos literarios.";
+      $("#recButtons").innerHTML = "";
+      return;
+    }
+
+    this.current = pickRandom(this.data);
+
+    const prompt = this.getField(this.current, "prompt", "pregunta", "texto", "enunciado");
+    const options = this.current.options || this.current.opciones || this.current.choices || [];
+    const answer = this.getField(this.current, "answer", "correcta", "solucion", "respuesta");
+
+    $("#recPrompt").textContent = prompt || "(sin pregunta en el JSON)";
+
+    const wrap = $("#recButtons");
+    wrap.innerHTML = "";
+
+    (Array.isArray(options) ? options : []).forEach(opt => {
+      const b = document.createElement("button");
+      b.className = "chip";
+      b.textContent = opt;
+      b.addEventListener("click", () => {
+        const ok = norm(opt) === norm(answer);
+
+        this.scoreTot += 1;
+        if (ok) this.scoreOk += 1;
+        appScore.add(ok);
+
+        showFeedback(ok ? "¡Correcto!" : `No. Era: "${answer}"`, ok ? "ok" : "bad");
+        $("#recScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
+      });
+      wrap.appendChild(b);
+    });
+
+    $("#recScore").textContent = `Aciertos: ${this.scoreOk} / ${this.scoreTot}`;
+  }
+};
+
+/* UI helpers for “chips” seleccionables */
+function renderChips(containerSel, values, onPick) {
+  const wrap = $(containerSel);
+  if (!wrap) return;
+  wrap.innerHTML = "";
+  values.forEach(v => {
+    const b = document.createElement("button");
+    b.className = "chip";
+    b.textContent = v;
+    b.addEventListener("click", () => onPick(v));
+    wrap.appendChild(b);
   });
 }
 
-/* ============================================================
-   Arranque
-============================================================ */
-init();
+function markSelected(containerSel, value) {
+  const wrap = $(containerSel);
+  if (!wrap) return;
+  Array.from(wrap.querySelectorAll("button")).forEach(btn => {
+    btn.classList.toggle("primary", btn.textContent === value);
+  });
+}
+
+/* Boot */
+window.addEventListener("DOMContentLoaded", () => {
+  bindNav();
+  appScore.render();
+  setView("home");
+});
