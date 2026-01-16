@@ -61,3 +61,12 @@ input[type=text]:focus{outline:2px solid rgba(91,140,255,.35);outline-offset:2px
 .chip.ok { outline: 2px solid rgba(46,204,113,.5); }
 .chip.bad { outline: 2px solid rgba(255,92,92,.5); }
 
+/* Botón seleccionado (visible) */
+button.selected,
+.chip.selected {
+  outline: 2px solid rgba(91,140,255,.70);
+  box-shadow: 0 0 0 3px rgba(91,140,255,.18);
+}
+
+/* Blindaje anti-overlays raros */
+.card, button { position: relative; z-index: 1; }
