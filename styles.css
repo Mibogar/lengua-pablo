@@ -39,4 +39,25 @@ input[type=text]:focus{outline:2px solid rgba(91,140,255,.35);outline-offset:2px
 .hidden{display:none}
 
 .hint{margin:8px 0 0;color:var(--muted);font-size:14px}
+/* --- Navegación por pantallas --- */
+.view { display: none; margin-top: 14px; }
+.view.active { display: block; }
+
+/* Ajustes menores de clases usadas en el HTML */
+.btn { }
+.input { }
+.footer { margin-top: 14px; display:flex; gap:10px; justify-content:center; flex-wrap:wrap; color: var(--muted); }
+.link { background: transparent; border: none; padding: 8px 10px; border-radius: 10px; }
+.link:hover { background: rgba(255,255,255,.06); }
+.sep { color: rgba(255,255,255,.25); }
+.sentence { font-size: 18px; line-height: 1.35; margin: 10px 0; }
+.word { font-size: 34px; font-weight: 800; letter-spacing: .5px; margin: 6px 0 2px; }
+.feedback { margin: 12px 0; padding: 10px 12px; border-radius: 12px; border: 1px solid var(--border); }
+.feedback.ok { border-color: rgba(46,204,113,.5); }
+.feedback.bad { border-color: rgba(255,92,92,.5); }
+.question { margin-top: 12px; }
+.choices { display:flex; gap:10px; flex-wrap:wrap; }
+.chip { padding:10px 12px; border-radius: 999px; }
+.chip.ok { outline: 2px solid rgba(46,204,113,.5); }
+.chip.bad { outline: 2px solid rgba(255,92,92,.5); }
 
