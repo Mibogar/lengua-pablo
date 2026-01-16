@@ -1,0 +1,502 @@
+[
+  {
+    "palabra": "boca",
+    "hueco": "_oca",
+    "letra": "b"
+  },
+  {
+    "palabra": "boda",
+    "hueco": "_oda",
+    "letra": "b"
+  },
+  {
+    "palabra": "bote",
+    "hueco": "_ote",
+    "letra": "b"
+  },
+  {
+    "palabra": "botella",
+    "hueco": "_otella",
+    "letra": "b"
+  },
+  {
+    "palabra": "broma",
+    "hueco": "_roma",
+    "letra": "b"
+  },
+  {
+    "palabra": "bravo",
+    "hueco": "_ravo",
+    "letra": "b"
+  },
+  {
+    "palabra": "brazo",
+    "hueco": "_razo",
+    "letra": "b"
+  },
+  {
+    "palabra": "burbuja",
+    "hueco": "_urbuja",
+    "letra": "b"
+  },
+  {
+    "palabra": "buscar",
+    "hueco": "_uscar",
+    "letra": "b"
+  },
+  {
+    "palabra": "borrar",
+    "hueco": "_orrar",
+    "letra": "b"
+  },
+  {
+    "palabra": "barrio",
+    "hueco": "_arrio",
+    "letra": "b"
+  },
+  {
+    "palabra": "barco",
+    "hueco": "_arco",
+    "letra": "b"
+  },
+  {
+    "palabra": "balon",
+    "hueco": "_alon",
+    "letra": "b"
+  },
+  {
+    "palabra": "bailar",
+    "hueco": "_ailar",
+    "letra": "b"
+  },
+  {
+    "palabra": "bajar",
+    "hueco": "_ajar",
+    "letra": "b"
+  },
+  {
+    "palabra": "bandeja",
+    "hueco": "_andeja",
+    "letra": "b"
+  },
+  {
+    "palabra": "bandera",
+    "hueco": "_andera",
+    "letra": "b"
+  },
+  {
+    "palabra": "banco",
+    "hueco": "_anco",
+    "letra": "b"
+  },
+  {
+    "palabra": "bebida",
+    "hueco": "_ebida",
+    "letra": "b"
+  },
+  {
+    "palabra": "beber",
+    "hueco": "_eber",
+    "letra": "b"
+  },
+  {
+    "palabra": "beso",
+    "hueco": "_eso",
+    "letra": "b"
+  },
+  {
+    "palabra": "biblioteca",
+    "hueco": "_iblioteca",
+    "letra": "b"
+  },
+  {
+    "palabra": "bicicleta",
+    "hueco": "_icicleta",
+    "letra": "b"
+  },
+  {
+    "palabra": "bigote",
+    "hueco": "_igote",
+    "letra": "b"
+  },
+  {
+    "palabra": "billete",
+    "hueco": "_illete",
+    "letra": "b"
+  },
+  {
+    "palabra": "bingo",
+    "hueco": "_ingo",
+    "letra": "b"
+  },
+  {
+    "palabra": "blanco",
+    "hueco": "_lanco",
+    "letra": "b"
+  },
+  {
+    "palabra": "bloque",
+    "hueco": "_loque",
+    "letra": "b"
+  },
+  {
+    "palabra": "bonito",
+    "hueco": "_onito",
+    "letra": "b"
+  },
+  {
+    "palabra": "bondad",
+    "hueco": "_ondad",
+    "letra": "b"
+  },
+  {
+    "palabra": "bosque",
+    "hueco": "_osque",
+    "letra": "b"
+  },
+  {
+    "palabra": "boton",
+    "hueco": "_oton",
+    "letra": "b"
+  },
+  {
+    "palabra": "brillar",
+    "hueco": "_rillar",
+    "letra": "b"
+  },
+  {
+    "palabra": "bruja",
+    "hueco": "_ruja",
+    "letra": "b"
+  },
+  {
+    "palabra": "burla",
+    "hueco": "_urla",
+    "letra": "b"
+  },
+  {
+    "palabra": "caballo",
+    "hueco": "ca_allo",
+    "letra": "b"
+  },
+  {
+    "palabra": "cabra",
+    "hueco": "ca_ra",
+    "letra": "b"
+  },
+  {
+    "palabra": "cubo",
+    "hueco": "cu_o",
+    "letra": "b"
+  },
+  {
+    "palabra": "doblar",
+    "hueco": "do_lar",
+    "letra": "b"
+  },
+  {
+    "palabra": "recibir",
+    "hueco": "reci_ir",
+    "letra": "b"
+  },
+  {
+    "palabra": "subir",
+    "hueco": "su_ir",
+    "letra": "b"
+  },
+  {
+    "palabra": "saber",
+    "hueco": "sa_er",
+    "letra": "b"
+  },
+  {
+    "palabra": "deber",
+    "hueco": "de_er",
+    "letra": "b"
+  },
+  {
+    "palabra": "bastante",
+    "hueco": "_astante",
+    "letra": "b"
+  },
+  {
+    "palabra": "bastón",
+    "hueco": "_astón",
+    "letra": "b"
+  },
+  {
+    "palabra": "bodega",
+    "hueco": "_odega",
+    "letra": "b"
+  },
+  {
+    "palabra": "burbujear",
+    "hueco": "_urbujear",
+    "letra": "b"
+  },
+  {
+    "palabra": "buzo",
+    "hueco": "_uzo",
+    "letra": "b"
+  },
+  {
+    "palabra": "tiburón",
+    "hueco": "ti_urón",
+    "letra": "b"
+  },
+  {
+    "palabra": "abierto",
+    "hueco": "a_ierto",
+    "letra": "b"
+  },
+  {
+    "palabra": "vaca",
+    "hueco": "_aca",
+    "letra": "v"
+  },
+  {
+    "palabra": "valle",
+    "hueco": "_alle",
+    "letra": "v"
+  },
+  {
+    "palabra": "valor",
+    "hueco": "_alor",
+    "letra": "v"
+  },
+  {
+    "palabra": "valorar",
+    "hueco": "_alorar",
+    "letra": "v"
+  },
+  {
+    "palabra": "valiente",
+    "hueco": "_aliente",
+    "letra": "v"
+  },
+  {
+    "palabra": "vaso",
+    "hueco": "_aso",
+    "letra": "v"
+  },
+  {
+    "palabra": "vecino",
+    "hueco": "_ecino",
+    "letra": "v"
+  },
+  {
+    "palabra": "vender",
+    "hueco": "_ender",
+    "letra": "v"
+  },
+  {
+    "palabra": "venir",
+    "hueco": "_enir",
+    "letra": "v"
+  },
+  {
+    "palabra": "ventana",
+    "hueco": "_entana",
+    "letra": "v"
+  },
+  {
+    "palabra": "verdad",
+    "hueco": "_erdad",
+    "letra": "v"
+  },
+  {
+    "palabra": "verde",
+    "hueco": "_erde",
+    "letra": "v"
+  },
+  {
+    "palabra": "verano",
+    "hueco": "_erano",
+    "letra": "v"
+  },
+  {
+    "palabra": "vereda",
+    "hueco": "_ereda",
+    "letra": "v"
+  },
+  {
+    "palabra": "verso",
+    "hueco": "_erso",
+    "letra": "v"
+  },
+  {
+    "palabra": "vestido",
+    "hueco": "_estido",
+    "letra": "v"
+  },
+  {
+    "palabra": "viaje",
+    "hueco": "_iaje",
+    "letra": "v"
+  },
+  {
+    "palabra": "viajar",
+    "hueco": "_iajar",
+    "letra": "v"
+  },
+  {
+    "palabra": "viajero",
+    "hueco": "_iajero",
+    "letra": "v"
+  },
+  {
+    "palabra": "viento",
+    "hueco": "_iento",
+    "letra": "v"
+  },
+  {
+    "palabra": "viga",
+    "hueco": "_iga",
+    "letra": "v"
+  },
+  {
+    "palabra": "vigilar",
+    "hueco": "_igilar",
+    "letra": "v"
+  },
+  {
+    "palabra": "vigilante",
+    "hueco": "_igilante",
+    "letra": "v"
+  },
+  {
+    "palabra": "vigor",
+    "hueco": "_igor",
+    "letra": "v"
+  },
+  {
+    "palabra": "villa",
+    "hueco": "_illa",
+    "letra": "v"
+  },
+  {
+    "palabra": "vino",
+    "hueco": "_ino",
+    "letra": "v"
+  },
+  {
+    "palabra": "violin",
+    "hueco": "_iolin",
+    "letra": "v"
+  },
+  {
+    "palabra": "viral",
+    "hueco": "_iral",
+    "letra": "v"
+  },
+  {
+    "palabra": "virgen",
+    "hueco": "_irgen",
+    "letra": "v"
+  },
+  {
+    "palabra": "vista",
+    "hueco": "_ista",
+    "letra": "v"
+  },
+  {
+    "palabra": "visita",
+    "hueco": "_isita",
+    "letra": "v"
+  },
+  {
+    "palabra": "vivir",
+    "hueco": "_ivir",
+    "letra": "v"
+  },
+  {
+    "palabra": "vivo",
+    "hueco": "_ivo",
+    "letra": "v"
+  },
+  {
+    "palabra": "vivienda",
+    "hueco": "_ivienda",
+    "letra": "v"
+  },
+  {
+    "palabra": "volver",
+    "hueco": "_olver",
+    "letra": "v"
+  },
+  {
+    "palabra": "volverá",
+    "hueco": "_olverá",
+    "letra": "v"
+  },
+  {
+    "palabra": "volveremos",
+    "hueco": "_olveremos",
+    "letra": "v"
+  },
+  {
+    "palabra": "votar",
+    "hueco": "_otar",
+    "letra": "v"
+  },
+  {
+    "palabra": "avión",
+    "hueco": "a_ión",
+    "letra": "v"
+  },
+  {
+    "palabra": "lluvia",
+    "hueco": "llu_ia",
+    "letra": "v"
+  },
+  {
+    "palabra": "nieve",
+    "hueco": "nie_e",
+    "letra": "v"
+  },
+  {
+    "palabra": "nuevo",
+    "hueco": "nue_o",
+    "letra": "v"
+  },
+  {
+    "palabra": "suave",
+    "hueco": "sua_e",
+    "letra": "v"
+  },
+  {
+    "palabra": "grave",
+    "hueco": "gra_e",
+    "letra": "v"
+  },
+  {
+    "palabra": "octavo",
+    "hueco": "octa_o",
+    "letra": "v"
+  },
+  {
+    "palabra": "volumen",
+    "hueco": "_olumen",
+    "letra": "v"
+  },
+  {
+    "palabra": "vacuna",
+    "hueco": "_acuna",
+    "letra": "v"
+  },
+  {
+    "palabra": "varita",
+    "hueco": "_arita",
+    "letra": "v"
+  },
+  {
+    "palabra": "victoria",
+    "hueco": "_ictoria",
+    "letra": "v"
+  },
+  {
+    "palabra": "vida",
+    "hueco": "_ida",
+    "letra": "v"
+  }
+]

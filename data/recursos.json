@@ -1,0 +1,266 @@
+[
+  {
+    "tipo": "Metáfora",
+    "modo": "teoría",
+    "enunciado": "Decir que una cosa es otra para compararlas sin usar 'como'.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "teoría",
+    "enunciado": "Comparar dos cosas usando 'como', 'igual que' o 'parece'.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "teoría",
+    "enunciado": "Dar cualidades o acciones humanas a animales u objetos.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "teoría",
+    "enunciado": "Exagerar mucho una cosa para llamar la atención o expresar emoción.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "Sus dientes son perlas.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "El tiempo es un ladrón.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "Tu voz es música.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "La ciudad es una jungla.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "Sus palabras fueron cuchillos.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "La noche es un manto.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "Tus ojos son estrellas.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "El mar es un espejo.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "La vida es un viaje.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Metáfora",
+    "modo": "práctica",
+    "enunciado": "El aula era un horno.",
+    "respuesta": "Metáfora"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Corre como el viento.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Fuerte como un toro.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Brilla como el sol.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Duro como una roca.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Silencioso como un gato.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Rápido como un rayo.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Frío como el hielo.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Dulce como la miel.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Lento como una tortuga.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Símil",
+    "modo": "práctica",
+    "enunciado": "Claro como el agua.",
+    "respuesta": "Símil"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "El sol sonríe.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "El viento susurra.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "La luna nos observa.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "Las hojas bailan.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "El reloj corre.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "La ciudad duerme.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "La lluvia canta.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "El fuego devora la madera.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "Las estrellas nos miran.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Personificación",
+    "modo": "práctica",
+    "enunciado": "El libro habla.",
+    "respuesta": "Personificación"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Te lo he dicho mil veces.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Tengo tanta hambre que me comería un caballo.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Lloró un río de lágrimas.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Esperé una eternidad.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Estoy muerto de cansancio.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Había millones de personas.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Me duele hasta el alma.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Pesaba una tonelada.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "Salté de alegría hasta el cielo.",
+    "respuesta": "Hipérbole"
+  },
+  {
+    "tipo": "Hipérbole",
+    "modo": "práctica",
+    "enunciado": "No tengo ni un segundo libre.",
+    "respuesta": "Hipérbole"
+  }
+]
