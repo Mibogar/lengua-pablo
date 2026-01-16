@@ -1,134 +1,150 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Lengua — Pablo</title>
-  <link rel="stylesheet" href="styles.css?v=20260116-1">
+  <link rel="stylesheet" href="styles.css?v=20260116-2325">
+  <script>
+    // Cambia esto cuando subas a GitHub para forzar recarga real
+    window.APP_VERSION = "20260116-2325";
+  </script>
 </head>
 
 <body>
   <div class="app">
-    <header class="header">
+    <header>
       <div class="brand">
-        <!-- Si no tienes icono, puedes borrar el img -->
-        <img src="icon-192.png" alt="" onerror="this.style.display='none'">
         <div>
           <h1>Lengua</h1>
-          <div class="badge">Elige qué estudiar</div>
+          <div class="badge muted">Elige qué estudiar</div>
         </div>
       </div>
-      <button id="btn-ready" class="small ghost">Listo</button>
+      <button id="btnListo" class="small ghost" type="button">Listo</button>
     </header>
 
-    <div id="feedback" class="feedback hidden"></div>
-
     <!-- HOME -->
-    <section id="home" class="view active">
+    <section id="viewHome" class="view active">
       <div class="card">
         <div class="label">Elige qué estudiar</div>
         <div class="grid">
-          <button id="homeConj" class="primary">Conjugaciones verbales</button>
-          <button id="homeBV">Ortografía: b / v</button>
-          <button id="homeRec">Recursos literarios</button>
+          <button id="homeConj" class="primary" type="button">Conjugaciones verbales</button>
+          <button id="homeBV" type="button">Ortografía: b / v</button>
+          <button id="homeRec" type="button">Recursos literarios</button>
         </div>
       </div>
     </section>
 
     <!-- CONJUGACIONES -->
-    <section id="conjugaciones" class="view">
+    <section id="viewConj" class="view">
       <div class="card">
-        <div class="row">
-          <h2 style="margin:0">Conjugaciones</h2>
-          <div style="flex:1"></div>
-          <button id="conjModeRecon" class="small">Reconocer</button>
-          <button id="conjModeProd" class="small">Producir</button>
+        <div class="row space">
+          <div>
+            <h2 style="margin:0">Conjugaciones</h2>
+            <div class="muted" style="margin-top:4px">Reconocer o clasificar una forma verbal</div>
+          </div>
+          <div class="row">
+            <button id="conjTabRecon" class="small" type="button">Reconocer</button>
+            <button id="conjTabProd" class="small" type="button">Producir</button>
+          </div>
         </div>
 
         <div class="hr"></div>
 
-        <div id="conjSentence" class="sentence"></div>
-
-        <div id="conjReconUI">
-          <div class="label">Escribe el verbo (o grupo verbal) tal como aparece en la frase</div>
-          <div class="row">
-            <input id="conjInput" type="text" placeholder="Escribe aquí…" />
-            <button id="conjCheck" class="primary">Comprobar</button>
+        <!-- Reconocer -->
+        <div id="conjReconBox">
+          <div class="sentence" id="conjSentence"></div>
+          <div class="row" style="margin-top:10px">
+            <input id="conjInput" type="text" placeholder="Escribe la forma verbal exacta" />
+            <button id="conjCheck" class="primary" type="button">Comprobar</button>
+            <button id="conjNext" type="button">Siguiente</button>
           </div>
-          <div class="hint" id="conjHint"></div>
-          <div class="row space" style="margin-top:12px">
-            <div class="muted" id="conjScore"></div>
-            <button id="conjNext" class="small">Siguiente</button>
-          </div>
+          <div id="conjFeedback" class="feedback hidden"></div>
+          <div class="footerNote">Fíjate en la frase y copia la forma verbal tal cual aparece.</div>
         </div>
 
-        <div id="conjProdUI" class="hidden">
+        <!-- Producir (clasificar forma) -->
+        <div id="conjProdBox" class="hidden">
           <div class="label">Forma:</div>
-          <div id="prodForm" class="word"></div>
-
-          <div class="label">Clasifica esta forma en 3 pasos</div>
+          <div class="word" id="prodForma"></div>
 
           <div class="label">1) Modo</div>
-          <div id="prodStep1" class="choices"></div>
+          <div class="choices" id="prodModo"></div>
 
           <div class="label">2) Tiempo (grupo)</div>
-          <div id="prodStep2" class="choices"></div>
+          <div class="choices" id="prodGrupo"></div>
 
-          <div class="label">3) Tipo exacto</div>
-          <div id="prodStep3" class="choices"></div>
+          <div class="label">3) Tipo exacto (depende del 2)</div>
+          <div class="choices" id="prodTipo"></div>
+
+          <div class="label">Persona</div>
+          <div class="choices" id="prodPersona"></div>
+
+          <div class="label">Número</div>
+          <div class="choices" id="prodNumero"></div>
 
           <div class="row" style="margin-top:12px">
-            <button id="prodCheck" class="primary">Comprobar</button>
-            <button id="prodNext" class="small">Siguiente</button>
+            <button id="prodCheck" class="primary" type="button">Comprobar</button>
+            <button id="prodNext" type="button">Siguiente</button>
           </div>
-          <div class="muted" id="prodScore" style="margin-top:10px"></div>
+
+          <div id="prodFeedback" class="feedback hidden"></div>
         </div>
+
+        <div class="hr"></div>
+        <div class="muted" id="conjScore">Aciertos: 0 / 0</div>
       </div>
     </section>
 
     <!-- BV -->
-    <section id="bv" class="view">
+    <section id="viewBV" class="view">
       <div class="card">
-        <h2 style="margin:0 0 8px">Uso de b / v</h2>
+        <h2 style="margin:0">Uso de b / v</h2>
         <div class="label">Completa la palabra:</div>
-        <div id="bvWord" class="word"></div>
+        <div class="word" id="bvWord"></div>
 
-        <div class="row" style="margin-top:8px">
-          <button id="bvB" class="chip">b</button>
-          <button id="bvV" class="chip">v</button>
-          <button id="bvNext" class="small">Siguiente</button>
+        <div class="row" style="margin-top:10px">
+          <button id="bvB" class="chip" type="button">b</button>
+          <button id="bvV" class="chip" type="button">v</button>
+          <button id="bvNext" type="button">Siguiente</button>
         </div>
 
-        <div class="muted" id="bvScore" style="margin-top:10px"></div>
+        <div id="bvFeedback" class="feedback hidden"></div>
+
+        <div class="hr"></div>
+        <div class="muted" id="bvScore">Aciertos: 0 / 0</div>
       </div>
     </section>
 
     <!-- RECURSOS -->
-    <section id="recursos" class="view">
+    <section id="viewRec" class="view">
       <div class="card">
-        <h2 style="margin:0 0 8px">Recursos literarios</h2>
+        <h2 style="margin:0">Recursos literarios</h2>
+        <div class="sentence" id="recText"></div>
 
-        <div id="recPrompt" class="sentence"></div>
-        <div id="recButtons" class="choices" style="margin-top:10px"></div>
+        <div class="label">Elige el recurso:</div>
+        <div class="choices" id="recButtons"></div>
 
         <div class="row" style="margin-top:12px">
-          <button id="recNext" class="small">Siguiente</button>
+          <button id="recNext" type="button">Siguiente</button>
         </div>
 
-        <div class="muted" id="recScore" style="margin-top:10px"></div>
+        <div id="recFeedback" class="feedback hidden"></div>
+
+        <div class="hr"></div>
+        <div class="muted" id="recScore">Aciertos: 0 / 0</div>
       </div>
     </section>
 
-    <footer class="footer">
-      <button id="btn-home" class="link">Inicio</button>
+    <div class="footer">
+      <button id="btnHome" class="link" type="button">Inicio</button>
       <span class="sep">·</span>
-      <button id="btn-reset" class="link">Reiniciar marcador</button>
+      <button id="btnReset" class="link" type="button">Reiniciar marcador</button>
       <span class="sep">·</span>
-      <span id="score" class="muted">Aciertos: 0 / 0</span>
-    </footer>
+      <span id="globalScore">Aciertos: 0 / 0</span>
+    </div>
   </div>
 
-  <!-- OJO: el ?v=... fuerza a que NO se quede cacheado -->
-  <script src="app.js?v=20260116-7"></script>
+  <script src="app.js?v=20260116-2325"></script>
 </body>
 </html>
