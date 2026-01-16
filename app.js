@@ -3,9 +3,11 @@
    - Conjugaciones: Reconocer / Producir
    - b/v
    - Recursos literarios
-   FIX:
-   - Botones de "Producir" funcionando (event delegation)
-   - Paso 3 depende de Paso 2 (filtrado de opciones)
+
+   Mejoras:
+   - Botón seleccionado visible (chip.selected + aria-pressed)
+   - Paso 2: Futuro y Condicional se dividen en simple/compuesto
+   - Paso 3 depende del Paso 2 y muestra solo lo relevante
    ========================================================= */
 
 (() => {
@@ -26,21 +28,6 @@
     return norm(a) === norm(b);
   }
 
-  function choiceButton(label, key, value, selected) {
-    const cls = selected ? "chip selected" : "chip";
-    return `<button type="button" class="${cls}" data-action="pick" data-key="${key}" data-value="${value}">${label}</button>`;
-  }
-
-  function show(el, yes) {
-    if (!el) return;
-    el.classList.toggle("active", !!yes);
-  }
-
-  function setText(sel, txt) {
-    const el = $(sel);
-    if (el) el.textContent = txt;
-  }
-
   function escapeHtml(str) {
     return String(str ?? "")
       .replace(/&/g, "&amp;")
@@ -48,6 +35,12 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  function choiceButton(label, key, value, selected) {
+    const cls = selected ? "chip selected" : "chip";
+    const pressed = selected ? "true" : "false";
+    return `<button type="button" class="${cls}" aria-pressed="${pressed}" data-action="pick" data-key="${key}" data-value="${value}">${label}</button>`;
   }
 
   // ---------- Data loading ----------
@@ -64,8 +57,6 @@
   }
 
   async function loadAll() {
-    // Rutas esperadas por tu repo
-    // data/conjugaciones.json, data/bv.json, data/recursos.json
     const [c, b, r] = await Promise.all([
       fetchJSON("./data/conjugaciones.json"),
       fetchJSON("./data/bv.json"),
@@ -78,29 +69,25 @@
 
   // ---------- App state ----------
   const State = {
-    view: "home", // home | conj | bv | rec
+    view: "home",
     // Conjugaciones
     conjMode: "reconocer", // reconocer | producir
     conjIdx: 0,
-    conjAnswered: false,
-    conjOK: null,
     conjUserVerb: "",
     // Producir (clasificar)
     prodPick: {
-      modo: null,     // Indicativo/Subjuntivo/Imperativo
-      grupo: null,    // Presente/Pretérito/Futuro/Condicional
-      exacto: null    // depende de grupo
+      modo: null,   // Indicativo/Subjuntivo/Imperativo
+      grupo: null,  // Presente / Pretérito / Futuro simple / Futuro compuesto / Condicional simple / Condicional compuesto
+      exacto: null  // depende de grupo
     },
     // b/v
     bvIdx: 0,
-    bvOK: null,
     // recursos
-    recMode: "teoria", // teoria | practica
-    recIdx: 0,
-    recOK: null
+    recMode: "teoria",
+    recIdx: 0
   };
 
-  // ---------- DOM roots ----------
+  // ---------- DOM ----------
   const header = $(".header");
   const main = $("main");
   const feedback = $("#feedback");
@@ -115,23 +102,33 @@
   }
 
   // ---------- Conjugaciones: mapping (3 pasos) ----------
-  const STEP2_OPTIONS = ["Presente", "Pretérito", "Futuro", "Condicional"];
+  // Paso 2 con FUTURO y CONDICIONAL divididos
+  const STEP2_OPTIONS = [
+    "Presente",
+    "Pretérito",
+    "Futuro simple",
+    "Futuro compuesto",
+    "Condicional simple",
+    "Condicional compuesto"
+  ];
 
   function exactOptionsForGrupo(grupo, modo) {
-    // Si Pablo elige Modo = Imperativo, lo tratamos como:
-    // 2) Presente, 3) Imperativo (y no mostramos cosas raras)
-    if (modo === "Imperativo") {
-      return ["Imperativo"];
-    }
+    // Imperativo: lo simplificamos para Pablo
+    if (modo === "Imperativo") return ["Imperativo"];
+
     switch (grupo) {
       case "Presente":
         return ["Presente"];
       case "Pretérito":
         return ["Imperfecto", "Perfecto simple", "Perfecto compuesto", "Pluscuamperfecto"];
-      case "Futuro":
-        return ["Futuro", "Futuro perfecto"];
-      case "Condicional":
-        return ["Condicional", "Condicional perfecto"];
+      case "Futuro simple":
+        return ["Futuro simple"];
+      case "Futuro compuesto":
+        return ["Futuro compuesto"];
+      case "Condicional simple":
+        return ["Condicional simple"];
+      case "Condicional compuesto":
+        return ["Condicional compuesto"];
       default:
         return [];
     }
@@ -144,41 +141,54 @@
     return "Indicativo";
   }
 
-  function normalizeGrupo(raw) {
-    const x = norm(raw);
-    // Intentamos reconocer según texto
-    if (x.includes("cond")) return "Condicional";
-    if (x.includes("futu")) return "Futuro";
-    if (x.includes("pret") || x.includes("pasad") || x.includes("imperf") || x.includes("plusc") || x.includes("perfecto")) return "Pretérito";
-    if (x.includes("pres")) return "Presente";
-    return null;
-  }
-
+  // Mapea un "tiempo" del JSON a:
+  // - grupo (paso 2)
+  // - exacto (paso 3)
   function normalizeExacto(raw) {
     const x = norm(raw);
     if (!x) return null;
+
     if (x.includes("imperat")) return "Imperativo";
+
     if (x.includes("plusc")) return "Pluscuamperfecto";
     if (x.includes("imperf")) return "Imperfecto";
-    if (x.includes("futuro perfecto")) return "Futuro perfecto";
-    if (x === "futuro") return "Futuro";
-    if (x.includes("condicional perfecto") || x.includes("condicional compuesto")) return "Condicional perfecto";
-    if (x.includes("condicional")) return "Condicional";
-    if (x.includes("perfecto simple") || x.includes("indefinido") || x.includes("preterito perfecto simple")) return "Perfecto simple";
-    if (x.includes("perfecto compuesto") || x.includes("preterito perfecto compuesto")) return "Perfecto compuesto";
+
+    // Futuro / Futuro perfecto
+    if (x.includes("futuro perfecto") || x.includes("futuro compuesto")) return "Futuro compuesto";
+    if (x === "futuro" || x.includes("futuro simple")) return "Futuro simple";
+
+    // Condicional / Condicional perfecto
+    if (x.includes("condicional perfecto") || x.includes("condicional compuesto")) return "Condicional compuesto";
+    if (x.includes("condicional")) return "Condicional simple";
+
+    // Pretéritos
+    if (x.includes("perfecto simple") || x.includes("indefinido")) return "Perfecto simple";
+    if (x.includes("perfecto compuesto")) return "Perfecto compuesto";
+
     if (x.includes("presente")) return "Presente";
     return null;
   }
 
+  function normalizeGrupoFromExacto(exacto) {
+    if (!exacto) return null;
+    if (exacto === "Presente") return "Presente";
+    if (["Imperfecto", "Perfecto simple", "Perfecto compuesto", "Pluscuamperfecto"].includes(exacto)) return "Pretérito";
+    if (exacto === "Futuro simple") return "Futuro simple";
+    if (exacto === "Futuro compuesto") return "Futuro compuesto";
+    if (exacto === "Condicional simple") return "Condicional simple";
+    if (exacto === "Condicional compuesto") return "Condicional compuesto";
+    if (exacto === "Imperativo") return "Presente"; // lo tratamos así en paso 2
+    return null;
+  }
+
   function getFormaFromRow(row) {
-    // Intentamos varias claves típicas
     const candidates = [
       row.forma,
       row.formaConjugada,
       row.forma_verbal,
       row.verbo_forma,
       row.formaVerbal,
-      row.respuesta, // a veces guardan aquí
+      row.respuesta,
       row.verbForm
     ];
     const found = candidates.find(v => String(v ?? "").trim() !== "");
@@ -186,55 +196,47 @@
   }
 
   function getVerbAnswerFromRow(row) {
-    // Para Reconocer
-    const candidates = [
-      row.verbo,
-      row.respuesta,
-      row.verb,
-      row.answer
-    ];
+    const candidates = [row.verbo, row.respuesta, row.verb, row.answer];
     const found = candidates.find(v => String(v ?? "").trim() !== "");
     return found ? String(found).trim() : "";
   }
 
   function getSentenceFromRow(row) {
-    const candidates = [
-      row.frase,
-      row.oracion,
-      row.sentence,
-      row.texto
-    ];
+    const candidates = [row.frase, row.oracion, row.sentence, row.texto];
     const found = candidates.find(v => String(v ?? "").trim() !== "");
     return found ? String(found).trim() : "";
   }
 
   function expected3StepsFromRow(row) {
-    // Intentamos leer del JSON y normalizar.
-    // Si tu JSON tiene "modo" y "tiempo" (exacto), lo usamos.
     const modo = normalizeModo(row.modo || row.Modo || row.mood);
-    const exact = normalizeExacto(row.tiempo || row.Tiempo || row.exacto || row.tipo_exacto || row.tense);
+    const exacto = normalizeExacto(row.tiempo || row.Tiempo || row.exacto || row.tipo_exacto || row.tense);
+    let grupo = row.grupo || row.grupo2 || row.tiempo2 || row.grupoTiempo || row.time_group;
 
-    // Grupo: o lo trae explícito, o lo inferimos de "tiempo"
-    const grupo =
-      normalizeGrupo(row.grupo || row.grupo2 || row.tiempo2 || row.grupoTiempo || row.time_group) ||
-      (exact === "Presente" ? "Presente"
-        : ["Imperfecto", "Perfecto simple", "Perfecto compuesto", "Pluscuamperfecto"].includes(exact) ? "Pretérito"
-        : ["Futuro", "Futuro perfecto"].includes(exact) ? "Futuro"
-        : ["Condicional", "Condicional perfecto"].includes(exact) ? "Condicional"
-        : null);
+    // Si viene grupo explícito, normalizamos a nuestras etiquetas
+    if (grupo) {
+      const g = norm(grupo);
+      if (g.includes("condicional") && (g.includes("comp") || g.includes("perfect"))) grupo = "Condicional compuesto";
+      else if (g.includes("condicional")) grupo = "Condicional simple";
+      else if (g.includes("futuro") && (g.includes("comp") || g.includes("perfect"))) grupo = "Futuro compuesto";
+      else if (g.includes("futuro")) grupo = "Futuro simple";
+      else if (g.includes("pret") || g.includes("pasad")) grupo = "Pretérito";
+      else if (g.includes("pres")) grupo = "Presente";
+      else grupo = null;
+    } else {
+      grupo = normalizeGrupoFromExacto(exacto);
+    }
 
-    // Caso Imperativo: fijamos grupo y exacto
+    // Imperativo: forzamos estructura simple
     if (modo === "Imperativo") {
       return { modo, grupo: "Presente", exacto: "Imperativo" };
     }
 
-    return { modo, grupo, exacto: exact };
+    return { modo, grupo, exacto };
   }
 
   // ---------- Render ----------
   function render() {
     setFeedback(null, "");
-
     if (!main) return;
 
     if (State.view === "home") return renderHome();
@@ -252,7 +254,7 @@
           <button class="btn" data-action="nav" data-to="bv">Uso de b / v</button>
           <button class="btn" data-action="nav" data-to="rec">Recursos literarios</button>
         </div>
-        <div class="hint">Tip: la app no distingue mayúsculas.</div>
+        <div class="hint">Tip: no distingue mayúsculas ni tildes.</div>
       </section>
     `;
   }
@@ -268,8 +270,8 @@
 
     const modeTabs = `
       <div class="choices" style="margin-bottom:10px">
-        <button class="${State.conjMode === "reconocer" ? "chip selected" : "chip"}" data-action="setConjMode" data-mode="reconocer">Reconocer</button>
-        <button class="${State.conjMode === "producir" ? "chip selected" : "chip"}" data-action="setConjMode" data-mode="producir">Producir</button>
+        <button class="${State.conjMode === "reconocer" ? "chip selected" : "chip"}" aria-pressed="${State.conjMode === "reconocer"}" data-action="setConjMode" data-mode="reconocer">Reconocer</button>
+        <button class="${State.conjMode === "producir" ? "chip selected" : "chip"}" aria-pressed="${State.conjMode === "producir"}" data-action="setConjMode" data-mode="producir">Producir</button>
       </div>
     `;
 
@@ -310,14 +312,15 @@
       .map(m => choiceButton(m, "modo", m, pickedModo === m))
       .join("");
 
-    // Step 2: grupo (si modo imperativo, solo habilitamos Presente)
+    // Step 2: grupo
     const step2Btns = STEP2_OPTIONS.map(g => {
       const disabled = (pickedModo === "Imperativo" && g !== "Presente");
       const cls = (pickedGrupo === g ? "chip selected" : "chip") + (disabled ? " disabled" : "");
-      return `<button type="button" class="${cls}" data-action="pick" data-key="grupo" data-value="${g}" ${disabled ? "disabled" : ""}>${g}</button>`;
+      const pressed = pickedGrupo === g ? "true" : "false";
+      return `<button type="button" class="${cls}" aria-pressed="${pressed}" data-action="pick" data-key="grupo" data-value="${g}" ${disabled ? "disabled" : ""}>${g}</button>`;
     }).join("");
 
-    // Step 3: exacto (depende de grupo; si no hay grupo, no mostramos opciones)
+    // Step 3: exacto (depende de grupo)
     let exactBtns = "";
     let exactHint = "";
     if (!pickedGrupo) {
@@ -339,7 +342,7 @@
           <div style="margin-top:8px"><b>1) Modo</b></div>
           <div class="choices">${modoBtns}</div>
 
-          <div style="margin-top:12px"><b>2) Presente / Pretérito / Futuro / Condicional</b></div>
+          <div style="margin-top:12px"><b>2) Tiempo (grupo)</b></div>
           <div class="choices">${step2Btns}</div>
 
           <div style="margin-top:12px"><b>3) Tipo exacto</b></div>
@@ -364,7 +367,6 @@
 
     const row = list[State.bvIdx % list.length];
     const palabra = row.palabra || row.word || row.texto || "";
-    // Se asume que la palabra viene con "_" o "?" como hueco; si no, la mostramos tal cual.
     main.innerHTML = `
       <section class="card">
         <h2>Uso de b / v</h2>
@@ -393,8 +395,8 @@
 
     const modeTabs = `
       <div class="choices" style="margin-bottom:10px">
-        <button class="${State.recMode === "teoria" ? "chip selected" : "chip"}" data-action="setRecMode" data-mode="teoria">Teoría</button>
-        <button class="${State.recMode === "practica" ? "chip selected" : "chip"}" data-action="setRecMode" data-mode="practica">Práctica</button>
+        <button class="${State.recMode === "teoria" ? "chip selected" : "chip"}" aria-pressed="${State.recMode === "teoria"}" data-action="setRecMode" data-mode="teoria">Teoría</button>
+        <button class="${State.recMode === "practica" ? "chip selected" : "chip"}" aria-pressed="${State.recMode === "practica"}" data-action="setRecMode" data-mode="practica">Práctica</button>
       </div>
     `;
 
@@ -427,20 +429,16 @@
     if (!btn) return;
     const action = btn.dataset.action;
 
-    // NAV
     if (action === "nav") {
       State.view = btn.dataset.to;
-      // reset feedback
       setFeedback(null, "");
       render();
       return;
     }
 
-    // Conjugaciones: switch mode
     if (action === "setConjMode") {
       State.conjMode = btn.dataset.mode;
       setFeedback(null, "");
-      // reset producing picks when entering producir
       if (State.conjMode === "producir") {
         State.prodPick = { modo: null, grupo: null, exacto: null };
       }
@@ -448,20 +446,17 @@
       return;
     }
 
-    // Producing: pick buttons (modo/grupo/exacto)
     if (action === "pick") {
+      if (State.conjMode !== "producir") return;
+
       const key = btn.dataset.key;
       const value = btn.dataset.value;
 
-      if (State.conjMode !== "producir") return;
-
       if (key === "modo") {
         State.prodPick.modo = value;
-        // si cambia el modo: reset grupo y exacto
         State.prodPick.grupo = null;
         State.prodPick.exacto = null;
 
-        // si es imperativo, forzamos grupo=Presente y exacto queda en null hasta que elija
         if (value === "Imperativo") {
           State.prodPick.grupo = "Presente";
           State.prodPick.exacto = null;
@@ -470,7 +465,6 @@
 
       if (key === "grupo") {
         State.prodPick.grupo = value;
-        // al cambiar grupo: reset exacto
         State.prodPick.exacto = null;
       }
 
@@ -483,7 +477,6 @@
       return;
     }
 
-    // Conjugaciones: check verb (reconocer)
     if (action === "checkVerb") {
       const list = Data.conjugaciones || [];
       const row = list[State.conjIdx % list.length];
@@ -494,16 +487,10 @@
 
       const expected = getVerbAnswerFromRow(row);
 
-      if (!user) {
-        setFeedback("bad", "Escribe algo primero.");
-        return;
-      }
+      if (!user) return setFeedback("bad", "Escribe algo primero.");
 
-      if (eqLoose(user, expected)) {
-        setFeedback("ok", "¡Correcto!");
-      } else {
-        setFeedback("bad", `No. La respuesta era: "${expected}"`);
-      }
+      if (eqLoose(user, expected)) setFeedback("ok", "¡Correcto!");
+      else setFeedback("bad", `No. La respuesta era: "${expected}"`);
       return;
     }
 
@@ -515,15 +502,12 @@
       return;
     }
 
-    // Conjugaciones: check producir (3 pasos)
     if (action === "checkProducir") {
       const list = Data.conjugaciones || [];
       const row = list[State.conjIdx % list.length];
-
       const expected = expected3StepsFromRow(row);
       const pick = State.prodPick;
 
-      // Validaciones
       if (!pick.modo) return setFeedback("bad", "Elige el paso 1 (Modo).");
       if (!pick.grupo) return setFeedback("bad", "Elige el paso 2.");
       if (!pick.exacto) return setFeedback("bad", "Elige el paso 3.");
@@ -532,14 +516,8 @@
       const ok2 = pick.grupo === expected.grupo;
       const ok3 = pick.exacto === expected.exacto;
 
-      if (ok1 && ok2 && ok3) {
-        setFeedback("ok", "¡Correcto!");
-      } else {
-        setFeedback(
-          "bad",
-          `No. Era: ${expected.modo} / ${expected.grupo ?? "?"} / ${expected.exacto ?? "?"}`
-        );
-      }
+      if (ok1 && ok2 && ok3) setFeedback("ok", "¡Correcto!");
+      else setFeedback("bad", `No. Era: ${expected.modo} / ${expected.grupo ?? "?"} / ${expected.exacto ?? "?"}`);
       return;
     }
 
@@ -596,12 +574,9 @@
     }
   });
 
-  // Keep input synced (reconocer)
   document.addEventListener("input", (ev) => {
     const t = ev.target;
-    if (t && t.id === "verbInput") {
-      State.conjUserVerb = t.value;
-    }
+    if (t && t.id === "verbInput") State.conjUserVerb = t.value;
   });
 
   // ---------- Init ----------
@@ -613,12 +588,11 @@
       setFeedback("bad", String(e.message || e));
     }
 
-    // Header simple (si existe)
     if (header) {
       header.innerHTML = `
         <div class="brand">
           <h1>Lengua</h1>
-          <div class="subtitle" id="subtitle">Elige qué estudiar</div>
+          <div class="subtitle">Elige qué estudiar</div>
         </div>
         <button class="link" data-action="nav" data-to="home">Inicio</button>
       `;
