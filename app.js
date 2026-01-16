@@ -1,605 +1,604 @@
-/* =========================================================
-   Lengua — Pablo (GitHub Pages, vanilla JS)
-   - Conjugaciones: Reconocer / Producir
-   - b/v
-   - Recursos literarios
+/* Lengua — Pablo (GitHub Pages)
+   app.js completo
 
-   Mejoras:
-   - Botón seleccionado visible (chip.selected + aria-pressed)
-   - Paso 2: Futuro y Condicional se dividen en simple/compuesto
-   - Paso 3 depende del Paso 2 y muestra solo lo relevante
-   ========================================================= */
+   - Vistas: Home / Conjugaciones / b-v / Recursos
+   - Conjugaciones: Reconocer + Producir
+     * Producir = clasificar "Forma: <solucion>" en 3 pasos (dependiente)
+*/
 
 (() => {
-  "use strict";
+  // ---------------------------
+  // Helpers DOM
+  // ---------------------------
+  const $ = (sel) => document.querySelector(sel);
+  const byId = (id) => document.getElementById(id);
 
-  // ---------- Helpers ----------
-  const $ = (sel, root = document) => root.querySelector(sel);
+  function setHidden(el, hidden) {
+    if (!el) return;
+    el.classList.toggle("hidden", !!hidden);
+  }
 
-  function norm(s) {
-    return String(s ?? "")
+  function setText(el, txt) {
+    if (!el) return;
+    el.textContent = txt ?? "";
+  }
+
+  function normalize(s) {
+    return (s ?? "")
+      .toString()
       .trim()
       .toLowerCase()
       .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+      .replace(/[\u0300-\u036f]/g, ""); // quita tildes
   }
 
-  function eqLoose(a, b) {
-    return norm(a) === norm(b);
+  function shuffle(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
   }
 
-  function escapeHtml(str) {
-    return String(str ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
+  function pickRandom(arr) {
+    return arr[Math.floor(Math.random() * arr.length)];
   }
 
-  function choiceButton(label, key, value, selected) {
-    const cls = selected ? "chip selected" : "chip";
-    const pressed = selected ? "true" : "false";
-    return `<button type="button" class="${cls}" aria-pressed="${pressed}" data-action="pick" data-key="${key}" data-value="${value}">${label}</button>`;
+  // Marcar botones tipo "chip" como seleccionados usando la clase "primary"
+  function markSelected(container, selectedValue) {
+    if (!container) return;
+    const buttons = [...container.querySelectorAll("button[data-value]")];
+    buttons.forEach((b) => {
+      const isOn = b.getAttribute("data-value") === selectedValue;
+      b.classList.toggle("primary", isOn);
+      b.setAttribute("aria-pressed", isOn ? "true" : "false");
+    });
   }
 
-  // ---------- Data loading ----------
-  const Data = {
-    conjugaciones: null,
-    bv: null,
-    recursos: null
+  function buildButtonRow(container, values, onClick) {
+    if (!container) return;
+    container.innerHTML = "";
+    values.forEach((val) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "small"; // estilo compacto
+      b.textContent = val;
+      b.setAttribute("data-value", val);
+      b.addEventListener("click", () => onClick(val));
+      container.appendChild(b);
+    });
+  }
+
+  // ---------------------------
+  // Navegación por vistas
+  // ---------------------------
+  const views = {
+    home: byId("viewHome"),
+    conj: byId("viewConjugaciones"),
+    bv: byId("viewBV"),
+    rec: byId("viewRecursos"),
   };
 
-  async function fetchJSON(path) {
-    const r = await fetch(path, { cache: "no-store" });
-    if (!r.ok) throw new Error(`No se pudo cargar ${path} (${r.status})`);
-    return await r.json();
+  function showView(name) {
+    Object.entries(views).forEach(([k, el]) => setHidden(el, k !== name));
   }
 
-  async function loadAll() {
-    const [c, b, r] = await Promise.all([
-      fetchJSON("./data/conjugaciones.json"),
-      fetchJSON("./data/bv.json"),
-      fetchJSON("./data/recursos.json")
-    ]);
-    Data.conjugaciones = Array.isArray(c) ? c : (c?.items ?? []);
-    Data.bv = Array.isArray(b) ? b : (b?.items ?? []);
-    Data.recursos = Array.isArray(r) ? r : (r?.items ?? []);
-  }
+  // Botones de Home (si existen)
+  const btnGoConj = byId("btnGoConj");
+  const btnGoBV = byId("btnGoBV");
+  const btnGoRec = byId("btnGoRec");
 
-  // ---------- App state ----------
-  const State = {
-    view: "home",
-    // Conjugaciones
-    conjMode: "reconocer", // reconocer | producir
-    conjIdx: 0,
-    conjUserVerb: "",
-    // Producir (clasificar)
-    prodPick: {
-      modo: null,   // Indicativo/Subjuntivo/Imperativo
-      grupo: null,  // Presente / Pretérito / Futuro simple / Futuro compuesto / Condicional simple / Condicional compuesto
-      exacto: null  // depende de grupo
-    },
-    // b/v
-    bvIdx: 0,
-    // recursos
-    recMode: "teoria",
-    recIdx: 0
+  btnGoConj?.addEventListener("click", () => showView("conj"));
+  btnGoBV?.addEventListener("click", () => showView("bv"));
+  btnGoRec?.addEventListener("click", () => showView("rec"));
+
+  // Footer links
+  byId("btnInicio")?.addEventListener("click", () => showView("home"));
+
+  // ---------------------------
+  // Carga de datos
+  // ---------------------------
+  const DATA = {
+    conjugaciones: [],
+    bv: [],
+    recursos: [],
   };
 
-  // ---------- DOM ----------
-  const header = $(".header");
-  const main = $("main");
-  const feedback = $("#feedback");
-
-  function setFeedback(kind, msg) {
-    if (!feedback) return;
-    feedback.style.display = msg ? "flex" : "none";
-    feedback.classList.remove("ok", "bad");
-    if (kind === "ok") feedback.classList.add("ok");
-    if (kind === "bad") feedback.classList.add("bad");
-    feedback.textContent = msg || "";
+  async function loadJson(path) {
+    const res = await fetch(path, { cache: "no-store" });
+    if (!res.ok) throw new Error(`No se pudo cargar ${path} (${res.status})`);
+    return await res.json();
   }
 
-  // ---------- Conjugaciones: mapping (3 pasos) ----------
-  // Paso 2 con FUTURO y CONDICIONAL divididos
-  const STEP2_OPTIONS = [
-    "Presente",
-    "Pretérito",
-    "Futuro simple",
-    "Futuro compuesto",
-    "Condicional simple",
-    "Condicional compuesto"
-  ];
-
-  function exactOptionsForGrupo(grupo, modo) {
-    // Imperativo: lo simplificamos para Pablo
-    if (modo === "Imperativo") return ["Imperativo"];
-
-    switch (grupo) {
-      case "Presente":
-        return ["Presente"];
-      case "Pretérito":
-        return ["Imperfecto", "Perfecto simple", "Perfecto compuesto", "Pluscuamperfecto"];
-      case "Futuro simple":
-        return ["Futuro simple"];
-      case "Futuro compuesto":
-        return ["Futuro compuesto"];
-      case "Condicional simple":
-        return ["Condicional simple"];
-      case "Condicional compuesto":
-        return ["Condicional compuesto"];
-      default:
-        return [];
-    }
-  }
-
-  function normalizeModo(raw) {
-    const x = norm(raw);
-    if (x.includes("subj")) return "Subjuntivo";
-    if (x.includes("imperat")) return "Imperativo";
-    return "Indicativo";
-  }
-
-  // Mapea un "tiempo" del JSON a:
-  // - grupo (paso 2)
-  // - exacto (paso 3)
-  function normalizeExacto(raw) {
-    const x = norm(raw);
-    if (!x) return null;
-
-    if (x.includes("imperat")) return "Imperativo";
-
-    if (x.includes("plusc")) return "Pluscuamperfecto";
-    if (x.includes("imperf")) return "Imperfecto";
-
-    // Futuro / Futuro perfecto
-    if (x.includes("futuro perfecto") || x.includes("futuro compuesto")) return "Futuro compuesto";
-    if (x === "futuro" || x.includes("futuro simple")) return "Futuro simple";
-
-    // Condicional / Condicional perfecto
-    if (x.includes("condicional perfecto") || x.includes("condicional compuesto")) return "Condicional compuesto";
-    if (x.includes("condicional")) return "Condicional simple";
-
-    // Pretéritos
-    if (x.includes("perfecto simple") || x.includes("indefinido")) return "Perfecto simple";
-    if (x.includes("perfecto compuesto")) return "Perfecto compuesto";
-
-    if (x.includes("presente")) return "Presente";
-    return null;
-  }
-
-  function normalizeGrupoFromExacto(exacto) {
-    if (!exacto) return null;
-    if (exacto === "Presente") return "Presente";
-    if (["Imperfecto", "Perfecto simple", "Perfecto compuesto", "Pluscuamperfecto"].includes(exacto)) return "Pretérito";
-    if (exacto === "Futuro simple") return "Futuro simple";
-    if (exacto === "Futuro compuesto") return "Futuro compuesto";
-    if (exacto === "Condicional simple") return "Condicional simple";
-    if (exacto === "Condicional compuesto") return "Condicional compuesto";
-    if (exacto === "Imperativo") return "Presente"; // lo tratamos así en paso 2
-    return null;
-  }
-
-  function getFormaFromRow(row) {
-    const candidates = [
-      row.forma,
-      row.formaConjugada,
-      row.forma_verbal,
-      row.verbo_forma,
-      row.formaVerbal,
-      row.respuesta,
-      row.verbForm
-    ];
-    const found = candidates.find(v => String(v ?? "").trim() !== "");
-    return found ? String(found).trim() : "";
-  }
-
-  function getVerbAnswerFromRow(row) {
-    const candidates = [row.verbo, row.respuesta, row.verb, row.answer];
-    const found = candidates.find(v => String(v ?? "").trim() !== "");
-    return found ? String(found).trim() : "";
-  }
-
-  function getSentenceFromRow(row) {
-    const candidates = [row.frase, row.oracion, row.sentence, row.texto];
-    const found = candidates.find(v => String(v ?? "").trim() !== "");
-    return found ? String(found).trim() : "";
-  }
-
-  function expected3StepsFromRow(row) {
-    const modo = normalizeModo(row.modo || row.Modo || row.mood);
-    const exacto = normalizeExacto(row.tiempo || row.Tiempo || row.exacto || row.tipo_exacto || row.tense);
-    let grupo = row.grupo || row.grupo2 || row.tiempo2 || row.grupoTiempo || row.time_group;
-
-    // Si viene grupo explícito, normalizamos a nuestras etiquetas
-    if (grupo) {
-      const g = norm(grupo);
-      if (g.includes("condicional") && (g.includes("comp") || g.includes("perfect"))) grupo = "Condicional compuesto";
-      else if (g.includes("condicional")) grupo = "Condicional simple";
-      else if (g.includes("futuro") && (g.includes("comp") || g.includes("perfect"))) grupo = "Futuro compuesto";
-      else if (g.includes("futuro")) grupo = "Futuro simple";
-      else if (g.includes("pret") || g.includes("pasad")) grupo = "Pretérito";
-      else if (g.includes("pres")) grupo = "Presente";
-      else grupo = null;
-    } else {
-      grupo = normalizeGrupoFromExacto(exacto);
-    }
-
-    // Imperativo: forzamos estructura simple
-    if (modo === "Imperativo") {
-      return { modo, grupo: "Presente", exacto: "Imperativo" };
-    }
-
-    return { modo, grupo, exacto };
-  }
-
-  // ---------- Render ----------
-  function render() {
-    setFeedback(null, "");
-    if (!main) return;
-
-    if (State.view === "home") return renderHome();
-    if (State.view === "conj") return renderConj();
-    if (State.view === "bv") return renderBV();
-    if (State.view === "rec") return renderRecursos();
-  }
-
-  function renderHome() {
-    main.innerHTML = `
-      <section class="card">
-        <h2>¿Qué vamos a estudiar?</h2>
-        <div class="choiceGrid">
-          <button class="btn" data-action="nav" data-to="conj">Conjugaciones verbales</button>
-          <button class="btn" data-action="nav" data-to="bv">Uso de b / v</button>
-          <button class="btn" data-action="nav" data-to="rec">Recursos literarios</button>
-        </div>
-        <div class="hint">Tip: no distingue mayúsculas ni tildes.</div>
-      </section>
-    `;
-  }
-
-  function renderConj() {
-    const list = Data.conjugaciones || [];
-    if (!list.length) {
-      main.innerHTML = `<section class="card"><h2>Conjugaciones</h2><p>No hay datos cargados.</p></section>`;
-      return;
-    }
-
-    const row = list[State.conjIdx % list.length];
-
-    const modeTabs = `
-      <div class="choices" style="margin-bottom:10px">
-        <button class="${State.conjMode === "reconocer" ? "chip selected" : "chip"}" aria-pressed="${State.conjMode === "reconocer"}" data-action="setConjMode" data-mode="reconocer">Reconocer</button>
-        <button class="${State.conjMode === "producir" ? "chip selected" : "chip"}" aria-pressed="${State.conjMode === "producir"}" data-action="setConjMode" data-mode="producir">Producir</button>
-      </div>
-    `;
-
-    if (State.conjMode === "reconocer") {
-      const sentence = getSentenceFromRow(row);
-      main.innerHTML = `
-        <section class="card">
-          <h2>Conjugaciones</h2>
-          ${modeTabs}
-          <div class="sentence">${escapeHtml(sentence || "(sin frase en el JSON)")}</div>
-
-          <div class="question">
-            <input id="verbInput" type="text" placeholder="Escribe el verbo (o grupo verbal) tal como aparece" value="${escapeHtml(State.conjUserVerb)}" />
-            <button class="btn" data-action="checkVerb">Comprobar</button>
-          </div>
-
-          <div class="footerNote">Escribe el verbo tal como aparece en la frase.</div>
-
-          <div style="margin-top:12px">
-            <button class="link" data-action="nextConj">Siguiente</button>
-          </div>
-        </section>
-      `;
-      return;
-    }
-
-    // PRODUCIR
-    const forma = getFormaFromRow(row) || "(sin forma en el JSON)";
-    const expected = expected3StepsFromRow(row);
-
-    const pickedModo = State.prodPick.modo;
-    const pickedGrupo = State.prodPick.grupo;
-    const pickedExact = State.prodPick.exacto;
-
-    // Step 1: modo
-    const modoOptions = ["Indicativo", "Subjuntivo", "Imperativo"];
-    const modoBtns = modoOptions
-      .map(m => choiceButton(m, "modo", m, pickedModo === m))
-      .join("");
-
-    // Step 2: grupo
-    const step2Btns = STEP2_OPTIONS.map(g => {
-      const disabled = (pickedModo === "Imperativo" && g !== "Presente");
-      const cls = (pickedGrupo === g ? "chip selected" : "chip") + (disabled ? " disabled" : "");
-      const pressed = pickedGrupo === g ? "true" : "false";
-      return `<button type="button" class="${cls}" aria-pressed="${pressed}" data-action="pick" data-key="grupo" data-value="${g}" ${disabled ? "disabled" : ""}>${g}</button>`;
-    }).join("");
-
-    // Step 3: exacto (depende de grupo)
-    let exactBtns = "";
-    let exactHint = "";
-    if (!pickedGrupo) {
-      exactHint = `<div class="hint">Elige antes el paso 2.</div>`;
-    } else {
-      const opts = exactOptionsForGrupo(pickedGrupo, pickedModo || expected.modo);
-      exactBtns = opts.map(e => choiceButton(e, "exacto", e, pickedExact === e)).join("");
-    }
-
-    main.innerHTML = `
-      <section class="card">
-        <h2>Conjugaciones</h2>
-        ${modeTabs}
-
-        <div class="sentence"><b>Forma:</b> ${escapeHtml(forma)}</div>
-        <div class="footerNote">Clasifica esta forma en 3 pasos.</div>
-
-        <div class="question">
-          <div style="margin-top:8px"><b>1) Modo</b></div>
-          <div class="choices">${modoBtns}</div>
-
-          <div style="margin-top:12px"><b>2) Tiempo (grupo)</b></div>
-          <div class="choices">${step2Btns}</div>
-
-          <div style="margin-top:12px"><b>3) Tipo exacto</b></div>
-          ${exactHint}
-          <div class="choices">${exactBtns}</div>
-
-          <div style="margin-top:14px; display:flex; gap:10px; flex-wrap:wrap;">
-            <button class="btn" data-action="checkProducir">Comprobar</button>
-            <button class="link" data-action="nextProducir">Siguiente</button>
-          </div>
-        </div>
-      </section>
-    `;
-  }
-
-  function renderBV() {
-    const list = Data.bv || [];
-    if (!list.length) {
-      main.innerHTML = `<section class="card"><h2>Uso de b / v</h2><p>No hay datos cargados.</p></section>`;
-      return;
-    }
-
-    const row = list[State.bvIdx % list.length];
-    const palabra = row.palabra || row.word || row.texto || "";
-    main.innerHTML = `
-      <section class="card">
-        <h2>Uso de b / v</h2>
-        <div class="sentence"><b>Completa la palabra:</b> ${escapeHtml(palabra)}</div>
-
-        <div class="choices" style="margin-top:10px">
-          <button class="chip" data-action="bvPick" data-letter="b">b</button>
-          <button class="chip" data-action="bvPick" data-letter="v">v</button>
-          <button class="link" data-action="bvNext">Siguiente</button>
-        </div>
-      </section>
-    `;
-  }
-
-  function renderRecursos() {
-    const list = Data.recursos || [];
-    if (!list.length) {
-      main.innerHTML = `<section class="card"><h2>Recursos literarios</h2><p>No hay datos cargados.</p></section>`;
-      return;
-    }
-
-    const row = list[State.recIdx % list.length];
-    const tipo = row.tipo || row.recurso || row.kind || "";
-    const def = row.definicion || row.def || "";
-    const ejemplo = row.ejemplo || row.texto || row.example || "";
-
-    const modeTabs = `
-      <div class="choices" style="margin-bottom:10px">
-        <button class="${State.recMode === "teoria" ? "chip selected" : "chip"}" aria-pressed="${State.recMode === "teoria"}" data-action="setRecMode" data-mode="teoria">Teoría</button>
-        <button class="${State.recMode === "practica" ? "chip selected" : "chip"}" aria-pressed="${State.recMode === "practica"}" data-action="setRecMode" data-mode="practica">Práctica</button>
-      </div>
-    `;
-
-    const prompt =
-      State.recMode === "teoria"
-        ? `<div class="sentence">${escapeHtml(def || "(sin definición)")}</div><div class="footerNote">¿Qué recurso es?</div>`
-        : `<div class="sentence">${escapeHtml(ejemplo || "(sin ejemplo)")}</div><div class="footerNote">¿Qué recurso es?</div>`;
-
-    const options = ["Metáfora", "Símil", "Personificación", "Hipérbole"];
-    const optBtns = options
-      .map(o => `<button class="chip" data-action="recPick" data-value="${o}">${o}</button>`)
-      .join("");
-
-    main.innerHTML = `
-      <section class="card">
-        <h2>Recursos literarios</h2>
-        ${modeTabs}
-        ${prompt}
-        <div class="choices" style="margin-top:10px">${optBtns}</div>
-        <div style="margin-top:12px">
-          <button class="link" data-action="recNext">Siguiente</button>
-        </div>
-      </section>
-    `;
-  }
-
-  // ---------- Actions (event delegation) ----------
-  document.addEventListener("click", (ev) => {
-    const btn = ev.target.closest("[data-action]");
-    if (!btn) return;
-    const action = btn.dataset.action;
-
-    if (action === "nav") {
-      State.view = btn.dataset.to;
-      setFeedback(null, "");
-      render();
-      return;
-    }
-
-    if (action === "setConjMode") {
-      State.conjMode = btn.dataset.mode;
-      setFeedback(null, "");
-      if (State.conjMode === "producir") {
-        State.prodPick = { modo: null, grupo: null, exacto: null };
-      }
-      render();
-      return;
-    }
-
-    if (action === "pick") {
-      if (State.conjMode !== "producir") return;
-
-      const key = btn.dataset.key;
-      const value = btn.dataset.value;
-
-      if (key === "modo") {
-        State.prodPick.modo = value;
-        State.prodPick.grupo = null;
-        State.prodPick.exacto = null;
-
-        if (value === "Imperativo") {
-          State.prodPick.grupo = "Presente";
-          State.prodPick.exacto = null;
-        }
-      }
-
-      if (key === "grupo") {
-        State.prodPick.grupo = value;
-        State.prodPick.exacto = null;
-      }
-
-      if (key === "exacto") {
-        State.prodPick.exacto = value;
-      }
-
-      setFeedback(null, "");
-      render();
-      return;
-    }
-
-    if (action === "checkVerb") {
-      const list = Data.conjugaciones || [];
-      const row = list[State.conjIdx % list.length];
-
-      const input = $("#verbInput");
-      const user = (input?.value ?? "").trim();
-      State.conjUserVerb = user;
-
-      const expected = getVerbAnswerFromRow(row);
-
-      if (!user) return setFeedback("bad", "Escribe algo primero.");
-
-      if (eqLoose(user, expected)) setFeedback("ok", "¡Correcto!");
-      else setFeedback("bad", `No. La respuesta era: "${expected}"`);
-      return;
-    }
-
-    if (action === "nextConj") {
-      State.conjIdx = (State.conjIdx + 1) % (Data.conjugaciones?.length || 1);
-      State.conjUserVerb = "";
-      setFeedback(null, "");
-      render();
-      return;
-    }
-
-    if (action === "checkProducir") {
-      const list = Data.conjugaciones || [];
-      const row = list[State.conjIdx % list.length];
-      const expected = expected3StepsFromRow(row);
-      const pick = State.prodPick;
-
-      if (!pick.modo) return setFeedback("bad", "Elige el paso 1 (Modo).");
-      if (!pick.grupo) return setFeedback("bad", "Elige el paso 2.");
-      if (!pick.exacto) return setFeedback("bad", "Elige el paso 3.");
-
-      const ok1 = pick.modo === expected.modo;
-      const ok2 = pick.grupo === expected.grupo;
-      const ok3 = pick.exacto === expected.exacto;
-
-      if (ok1 && ok2 && ok3) setFeedback("ok", "¡Correcto!");
-      else setFeedback("bad", `No. Era: ${expected.modo} / ${expected.grupo ?? "?"} / ${expected.exacto ?? "?"}`);
-      return;
-    }
-
-    if (action === "nextProducir") {
-      State.conjIdx = (State.conjIdx + 1) % (Data.conjugaciones?.length || 1);
-      State.prodPick = { modo: null, grupo: null, exacto: null };
-      setFeedback(null, "");
-      render();
-      return;
-    }
-
-    // b/v
-    if (action === "bvPick") {
-      const list = Data.bv || [];
-      const row = list[State.bvIdx % list.length];
-
-      const expected = row.correcta || row.correct || row.letra || "";
-      const picked = btn.dataset.letter;
-
-      if (eqLoose(picked, expected)) setFeedback("ok", "¡Correcto!");
-      else setFeedback("bad", `No. Era: "${expected}"`);
-      return;
-    }
-    if (action === "bvNext") {
-      State.bvIdx = (State.bvIdx + 1) % (Data.bv?.length || 1);
-      setFeedback(null, "");
-      render();
-      return;
-    }
-
-    // recursos
-    if (action === "setRecMode") {
-      State.recMode = btn.dataset.mode;
-      setFeedback(null, "");
-      render();
-      return;
-    }
-    if (action === "recPick") {
-      const list = Data.recursos || [];
-      const row = list[State.recIdx % list.length];
-
-      const expected = row.tipo || row.recurso || row.kind || "";
-      const picked = btn.dataset.value;
-
-      if (eqLoose(picked, expected)) setFeedback("ok", "¡Correcto!");
-      else setFeedback("bad", `No. Era: "${expected}"`);
-      return;
-    }
-    if (action === "recNext") {
-      State.recIdx = (State.recIdx + 1) % (Data.recursos?.length || 1);
-      setFeedback(null, "");
-      render();
-      return;
-    }
-  });
-
-  document.addEventListener("input", (ev) => {
-    const t = ev.target;
-    if (t && t.id === "verbInput") State.conjUserVerb = t.value;
-  });
-
-  // ---------- Init ----------
-  async function init() {
+  async function boot() {
     try {
-      await loadAll();
+      // Rutas esperadas (GitHub Pages)
+      const [conj, bv, rec] = await Promise.all([
+        loadJson("./data/conjugaciones.json"),
+        loadJson("./data/bv.json"),
+        loadJson("./data/recursos.json"),
+      ]);
+
+      DATA.conjugaciones = Array.isArray(conj) ? conj : [];
+      DATA.bv = Array.isArray(bv) ? bv : [];
+      DATA.recursos = Array.isArray(rec) ? rec : [];
+
+      initConjugaciones();
+      initBV();
+      initRecursos();
     } catch (e) {
       console.error(e);
-      setFeedback("bad", String(e.message || e));
+      // si tienes un contenedor global de feedback, lo usamos
+      const fb = byId("feedback");
+      if (fb) {
+        fb.style.display = "block";
+        fb.textContent = `Error cargando datos: ${e.message}`;
+      } else {
+        alert(`Error cargando datos: ${e.message}`);
+      }
+    }
+  }
+
+  // ---------------------------
+  // Conjugaciones (Reconocer + Producir)
+  // ---------------------------
+  function initConjugaciones() {
+    // Elementos del HTML (según el index que veníamos usando)
+    const conjTitle = byId("conjTitle");
+    const conjSentence = byId("conjSentence");
+    const conjInput = byId("conjInput");
+    const conjCheck = byId("conjCheck");
+    const conjNext = byId("conjNext");
+    const conjHint = byId("conjHint");
+
+    // Contenedor "producir"
+    // Si tu index ya tiene estos IDs, perfecto. Si no, los creamos dentro de viewConjugaciones.
+    let prodBox = byId("conjProduceBox");
+    const conjView = views.conj;
+
+    // Tabs Reconocer / Producir (si no existen, los creamos)
+    let tabsRow = byId("conjTabsRow");
+    let btnReconocer = byId("btnConjReconocer");
+    let btnProducir = byId("btnConjProducir");
+
+    if (conjView && !tabsRow) {
+      tabsRow = document.createElement("div");
+      tabsRow.id = "conjTabsRow";
+      tabsRow.className = "row";
+      tabsRow.style.marginBottom = "10px";
+
+      btnReconocer = document.createElement("button");
+      btnReconocer.id = "btnConjReconocer";
+      btnReconocer.type = "button";
+      btnReconocer.className = "small primary";
+      btnReconocer.textContent = "Reconocer";
+
+      btnProducir = document.createElement("button");
+      btnProducir.id = "btnConjProducir";
+      btnProducir.type = "button";
+      btnProducir.className = "small";
+      btnProducir.textContent = "Producir";
+
+      tabsRow.appendChild(btnReconocer);
+      tabsRow.appendChild(btnProducir);
+
+      // insertar arriba del bloque de conjugaciones
+      const firstCard = conjView.querySelector(".card") || conjView;
+      firstCard.insertBefore(tabsRow, firstCard.firstChild);
     }
 
-    if (header) {
-      header.innerHTML = `
-        <div class="brand">
-          <h1>Lengua</h1>
-          <div class="subtitle">Elige qué estudiar</div>
-        </div>
-        <button class="link" data-action="nav" data-to="home">Inicio</button>
-      `;
+    // Si no existe caja producir, la montamos al final de la card
+    if (conjView && !prodBox) {
+      prodBox = document.createElement("div");
+      prodBox.id = "conjProduceBox";
+      prodBox.className = "card";
+      prodBox.style.marginTop = "12px";
+      conjView.appendChild(prodBox);
     }
+
+    // Estado
+    let mode = "reconocer"; // "reconocer" | "producir"
+    let current = null;
+
+    // Estado producir
+    let selModo = null;      // Indicativo/Subjuntivo/Imperativo
+    let selGrupo = null;     // Presente/Pretérito/Futuro/Condicional
+    let selExacto = null;    // depende del grupo
+
+    // UI producir (se renderiza siempre desde estado)
+    function renderProduceUI() {
+      if (!prodBox) return;
+
+      // Si estamos en reconocer, ocultamos
+      setHidden(prodBox, mode !== "producir");
+      if (mode !== "producir") return;
+
+      const form = (current?.solucion ?? current?.forma ?? "").toString().trim();
+      const shown = form || "(sin forma en el JSON)";
+
+      prodBox.innerHTML = `
+        <div class="row space">
+          <div>
+            <h2 style="margin:0 0 6px 0;">Conjugaciones</h2>
+            <div class="muted">Clasifica esta forma en 3 pasos.</div>
+          </div>
+        </div>
+
+        <div class="hr"></div>
+
+        <div style="font-size:18px;font-weight:800;margin-bottom:10px;">
+          Forma: <span id="prodForma">${escapeHtml(shown)}</span>
+        </div>
+
+        <div class="label">1) Modo</div>
+        <div class="row" id="prodRowModo"></div>
+
+        <div class="label">2) Tiempo (grupo)</div>
+        <div class="row" id="prodRowGrupo"></div>
+
+        <div class="label">3) Tipo exacto</div>
+        <div class="muted" id="prodExactHint" style="margin-bottom:8px;"></div>
+        <div class="row" id="prodRowExacto"></div>
+
+        <div class="row" style="margin-top:12px;">
+          <button id="prodComprobar" class="primary" type="button">Comprobar</button>
+          <button id="prodSiguiente" type="button">Siguiente</button>
+        </div>
+      `;
+
+      // Construir filas de botones
+      const rowModo = byId("prodRowModo");
+      const rowGrupo = byId("prodRowGrupo");
+      const rowExacto = byId("prodRowExacto");
+      const hint = byId("prodExactHint");
+
+      const modos = ["Indicativo", "Subjuntivo", "Imperativo"];
+      buildButtonRow(rowModo, modos, (v) => {
+        selModo = v;
+        markSelected(rowModo, v);
+      });
+
+      const grupos = ["Presente", "Pretérito", "Futuro", "Condicional"];
+      buildButtonRow(rowGrupo, grupos, (v) => {
+        selGrupo = v;
+        // al cambiar grupo, reiniciamos exacto
+        selExacto = null;
+        markSelected(rowGrupo, v);
+        renderExactOptions(rowExacto, hint);
+      });
+
+      // marcar selecciones actuales si hay
+      if (selModo) markSelected(rowModo, selModo);
+      if (selGrupo) markSelected(rowGrupo, selGrupo);
+
+      // Pintar exacto dependiente
+      renderExactOptions(rowExacto, hint);
+
+      // Botones
+      byId("prodComprobar")?.addEventListener("click", () => checkProduce());
+      byId("prodSiguiente")?.addEventListener("click", () => nextProduce());
+    }
+
+    function renderExactOptions(rowExacto, hintEl) {
+      if (!rowExacto || !hintEl) return;
+
+      // Sin elegir grupo aún
+      if (!selGrupo) {
+        setText(hintEl, "Elige antes el paso 2.");
+        rowExacto.innerHTML = "";
+        return;
+      }
+
+      // Presente: sin paso 3 real (lo fijamos a Presente)
+      if (selGrupo === "Presente") {
+        setText(hintEl, "En Presente no hay subdivisión aquí.");
+        rowExacto.innerHTML = "";
+        selExacto = "Presente";
+        // lo mostramos como pill para que quede claro
+        const pill = document.createElement("div");
+        pill.className = "pill";
+        pill.textContent = "Presente";
+        rowExacto.appendChild(pill);
+        return;
+      }
+
+      let opts = [];
+      if (selGrupo === "Pretérito") {
+        opts = [
+          "Imperfecto",
+          "Perfecto simple",
+          "Perfecto compuesto",
+          "Pluscuamperfecto",
+          "Anterior",
+        ];
+      } else if (selGrupo === "Futuro") {
+        opts = ["Futuro simple", "Futuro compuesto"];
+      } else if (selGrupo === "Condicional") {
+        opts = ["Condicional simple", "Condicional compuesto"];
+      }
+
+      setText(hintEl, "");
+      buildButtonRow(rowExacto, opts, (v) => {
+        selExacto = v;
+        markSelected(rowExacto, v);
+      });
+
+      if (selExacto) markSelected(rowExacto, selExacto);
+    }
+
+    // Reconocer UI visible / oculto
+    function setReconocerVisible(on) {
+      // Reutilizamos elementos existentes (input, frase, etc.)
+      // Si algún ID no existe, simplemente no rompemos.
+      if (conjTitle) setText(conjTitle, on ? "Conjugaciones" : "Conjugaciones");
+      setHidden(conjSentence?.closest(".card") || null, false); // no tocamos card
+
+      // Mostramos/ocultamos partes concretas
+      setHidden(conjSentence, !on);
+      setHidden(conjInput?.parentElement || conjInput, !on);
+      setHidden(conjCheck, !on);
+      setHidden(conjNext, !on);
+      setHidden(conjHint, !on);
+    }
+
+    // Elegir un item aleatorio
+    function newItem() {
+      if (!DATA.conjugaciones.length) return null;
+      return pickRandom(DATA.conjugaciones);
+    }
+
+    // ---------- Reconocer ----------
+    function startReconocer() {
+      mode = "reconocer";
+      btnReconocer?.classList.add("primary");
+      btnProducir?.classList.remove("primary");
+      setReconocerVisible(true);
+      setHidden(prodBox, true);
+
+      current = newItem();
+      setText(conjSentence, current?.frase ?? "");
+      if (conjInput) conjInput.value = "";
+    }
+
+    function checkReconocer() {
+      if (!current) return;
+      const correct = (current.solucion ?? "").toString().trim();
+      const user = (conjInput?.value ?? "").toString().trim();
+
+      // comparación sin distinguir mayúsculas/acentos
+      const ok = normalize(user) === normalize(correct);
+
+      const fb = byId("feedback");
+      if (fb) {
+        fb.style.display = "block";
+        fb.className = "feedback " + (ok ? "ok" : "bad");
+        fb.textContent = ok ? "¡Correcto!" : `No. La respuesta era: "${correct}"`;
+      }
+
+      // marcador (si existe)
+      const score = byId("score");
+      if (score) score.textContent = ok ? "Aciertos: 1 / 1" : "Aciertos: 0 / 1";
+    }
+
+    function nextReconocer() {
+      current = newItem();
+      setText(conjSentence, current?.frase ?? "");
+      if (conjInput) conjInput.value = "";
+      const fb = byId("feedback");
+      if (fb) fb.style.display = "none";
+    }
+
+    conjCheck?.addEventListener("click", checkReconocer);
+    conjNext?.addEventListener("click", nextReconocer);
+
+    // ---------- Producir ----------
+    function startProducir() {
+      mode = "producir";
+      btnProducir?.classList.add("primary");
+      btnReconocer?.classList.remove("primary");
+      setReconocerVisible(false);
+
+      current = newItem();
+      selModo = null;
+      selGrupo = null;
+      selExacto = null;
+
+      renderProduceUI();
+      const fb = byId("feedback");
+      if (fb) fb.style.display = "none";
+    }
+
+    // A partir del "tiempo" del JSON, deducimos grupo + exacto esperado
+    function expectedFromItem(item) {
+      const modo = (item?.modo ?? "").toString().trim();
+      const tiempo = (item?.tiempo ?? "").toString().trim();
+      const t = normalize(tiempo);
+
+      // 1) Modo esperado
+      let expModo = "Indicativo";
+      if (normalize(modo).includes("subj")) expModo = "Subjuntivo";
+      else if (normalize(modo).includes("imper")) expModo = "Imperativo";
+      else expModo = "Indicativo";
+
+      // 2) Grupo + 3) Exacto
+      let expGrupo = "Presente";
+      let expExacto = "Presente";
+
+      const isCond = t.includes("condicional");
+      const isFut = t.includes("futuro");
+      const isPres = t.includes("presente");
+      const isPret =
+        t.includes("preterito") ||
+        t.includes("imperfecto") ||
+        t.includes("pluscuamperfecto") ||
+        t.includes("anterior") ||
+        (t.includes("perfecto") && !isPres);
+
+      if (isCond) {
+        expGrupo = "Condicional";
+        expExacto = t.includes("compuesto") ? "Condicional compuesto" : "Condicional simple";
+      } else if (isFut) {
+        expGrupo = "Futuro";
+        expExacto = t.includes("compuesto") ? "Futuro compuesto" : "Futuro simple";
+      } else if (isPret) {
+        expGrupo = "Pretérito";
+
+        // Mapping a los nombres que quieres en el paso 3
+        if (t.includes("imperfecto")) expExacto = "Imperfecto";
+        else if (t.includes("pluscuamperfecto")) expExacto = "Pluscuamperfecto";
+        else if (t.includes("anterior")) expExacto = "Anterior";
+        else if (t.includes("perfecto compuesto")) expExacto = "Perfecto compuesto";
+        else if (t.includes("perfecto simple")) expExacto = "Perfecto simple";
+        else if (t.includes("perfecto") && t.includes("compuesto")) expExacto = "Perfecto compuesto";
+        else if (t.includes("perfecto") && t.includes("simple")) expExacto = "Perfecto simple";
+        else if (t.includes("perfecto")) {
+          // por defecto: si pone "pretérito perfecto" lo tratamos como simple (muchos materiales lo llaman así)
+          expExacto = "Perfecto simple";
+        } else {
+          // fallback
+          expExacto = "Perfecto simple";
+        }
+      } else if (isPres) {
+        expGrupo = "Presente";
+        expExacto = "Presente";
+      } else {
+        // fallback conservador
+        expGrupo = "Presente";
+        expExacto = "Presente";
+      }
+
+      return { expModo, expGrupo, expExacto };
+    }
+
+    function checkProduce() {
+      if (!current) return;
+
+      const { expModo, expGrupo, expExacto } = expectedFromItem(current);
+
+      // validaciones mínimas
+      if (!selModo || !selGrupo) {
+        showProduceFeedback(false, "Te falta elegir el modo (1) y el tiempo (2).");
+        return;
+      }
+      // Presente fija exacto a Presente
+      if (selGrupo === "Presente") selExacto = "Presente";
+
+      if (!selExacto) {
+        showProduceFeedback(false, "Te falta elegir el tipo exacto (3).");
+        return;
+      }
+
+      const ok =
+        normalize(selModo) === normalize(expModo) &&
+        normalize(selGrupo) === normalize(expGrupo) &&
+        normalize(selExacto) === normalize(expExacto);
+
+      if (ok) {
+        showProduceFeedback(true, "¡Correcto!");
+      } else {
+        showProduceFeedback(
+          false,
+          `No. Era: ${expModo} / ${expGrupo} / ${expExacto}`
+        );
+      }
+    }
+
+    function showProduceFeedback(ok, msg) {
+      const fb = byId("feedback");
+      if (!fb) {
+        alert(msg);
+        return;
+      }
+      fb.style.display = "block";
+      fb.className = "feedback " + (ok ? "ok" : "bad");
+      fb.textContent = msg;
+    }
+
+    function nextProduce() {
+      current = newItem();
+      selModo = null;
+      selGrupo = null;
+      selExacto = null;
+      renderProduceUI();
+      const fb = byId("feedback");
+      if (fb) fb.style.display = "none";
+    }
+
+    // Tabs
+    btnReconocer?.addEventListener("click", startReconocer);
+    btnProducir?.addEventListener("click", startProducir);
+
+    // Arranque por defecto
+    startReconocer();
+  }
+
+  // ---------------------------
+  // b/v (si ya te funcionaba, lo dejamos simple)
+  // ---------------------------
+  function initBV() {
+    const wordEl = byId("bvWord");
+    const btnB = byId("bvB");
+    const btnV = byId("bvV");
+    const next = byId("bvNext");
+
+    if (!wordEl || !btnB || !btnV || !next) return;
+
+    let items = DATA.bv.length ? shuffle(DATA.bv) : [];
+    let idx = 0;
+
+    function render() {
+      const it = items[idx];
+      setText(wordEl, it?.palabra ?? it?.prompt ?? "");
+    }
+
+    function check(letter) {
+      const it = items[idx];
+      const ok = normalize(it?.respuesta ?? it?.solucion ?? "") === normalize(letter);
+      const fb = byId("feedback");
+      if (fb) {
+        fb.style.display = "block";
+        fb.className = "feedback " + (ok ? "ok" : "bad");
+        fb.textContent = ok ? "¡Correcto!" : `No. Era: ${it?.respuesta ?? it?.solucion ?? ""}`;
+      }
+    }
+
+    btnB.addEventListener("click", () => check("b"));
+    btnV.addEventListener("click", () => check("v"));
+    next.addEventListener("click", () => {
+      idx = (idx + 1) % items.length;
+      const fb = byId("feedback");
+      if (fb) fb.style.display = "none";
+      render();
+    });
 
     render();
   }
 
-  window.addEventListener("DOMContentLoaded", init);
+  // ---------------------------
+  // Recursos literarios (si ya te funcionaba, lo dejamos simple)
+  // ---------------------------
+  function initRecursos() {
+    // Si tu recursos.html usa otros IDs, aquí no rompemos nada.
+    // Lo importante es no interferir.
+  }
+
+  // ---------------------------
+  // util: escapar HTML en innerHTML
+  // ---------------------------
+  function escapeHtml(str) {
+    return (str ?? "")
+      .toString()
+      .replaceAll("&", "&amp;")
+      .replaceAll("<", "&lt;")
+      .replaceAll(">", "&gt;")
+      .replaceAll('"', "&quot;")
+      .replaceAll("'", "&#039;");
+  }
+
+  // ---------------------------
+  // GO!
+  // ---------------------------
+  showView("home");
+  boot();
 })();
