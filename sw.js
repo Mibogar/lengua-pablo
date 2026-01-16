@@ -1,5 +1,5 @@
 /* Simple cache-first service worker for offline use */
-const CACHE = 'lengua-pablo-v4';
+const CACHE = 'lengua-pablo-v5';
 const ASSETS = [
   './',
   './index.html',
