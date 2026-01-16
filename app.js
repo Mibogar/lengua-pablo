@@ -1,474 +1,414 @@
-const PATHS = {
-  conjugaciones: "data/conjugaciones.json",
-  bv: "data/bv.json",
-  recursos: "data/recursos.json",
+"use strict";
+
+/* Anti-silencio: si algo revienta, lo verás en consola */
+window.addEventListener("error", e => console.log("JS ERROR", e));
+window.addEventListener("unhandledrejection", e => console.log("PROMISE ERROR", e));
+
+document.addEventListener("DOMContentLoaded", init);
+
+const state = {
+  view: "home",
+  score: { ok: 0, ko: 0 },
+
+  bv: { items: [], i: 0, locked: false },
+  rec: { items: [], i: 0, locked: false },
+  conj: { items: [], iRec: 0, iProd: 0, lockedRec: false, lockedProd: false }
 };
 
-const VERSION = (window.APP_VERSION || "dev");
+function $(sel){ return document.querySelector(sel); }
+function $all(sel){ return Array.from(document.querySelectorAll(sel)); }
 
-const $ = (s) => document.querySelector(s);
-const $$ = (s) => Array.from(document.querySelectorAll(s));
+function init(){
+  bindNav();
+  bindScore();
+  bindBV();
+  bindRecursos();
+  bindConjTabs();
+  bindConjReconocer();
+  bindConjProducir();
 
-function stripDiacritics(s) {
-  return String(s ?? "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "");
+  loadAllData().then(() => {
+    loadScore();
+    renderScore();
+    go("home");
+  });
 }
-function normalizeAnswer(s) {
-  return stripDiacritics(s).trim().replace(/\s+/g, " ").toLowerCase();
+
+function bindNav(){
+  $all("[data-go]").forEach(btn => {
+    btn.addEventListener("click", () => go(btn.dataset.go));
+  });
 }
-function pickRandom(arr) {
-  return arr[Math.floor(Math.random() * arr.length)];
-}
-function getField(obj, ...keys) {
-  for (const k of keys) {
-    if (obj && obj[k] != null && String(obj[k]).trim() !== "") return obj[k];
+
+function go(viewId){
+  state.view = viewId;
+  $all(".view").forEach(v => v.classList.remove("active"));
+  const el = document.getElementById(viewId);
+  if(!el){
+    console.log("Vista no encontrada:", viewId);
+    return;
   }
-  return "";
+  el.classList.add("active");
+
+  // refrescos suaves por vista
+  if(viewId === "bv") renderBV();
+  if(viewId === "recursos") renderRec();
+  if(viewId === "conj") {
+    // por defecto, Reconocer
+    setConjTab("reconocer");
+    renderConjReconocer();
+  }
 }
-async function loadJson(path) {
-  const url = `${path}?v=${encodeURIComponent(VERSION)}`;
-  const res = await fetch(url, { cache: "no-store" });
-  if (!res.ok) throw new Error(`No se pudo cargar ${url} (${res.status})`);
+
+/* ---------- SCORE ---------- */
+
+function bindScore(){
+  $("#resetScore").addEventListener("click", () => {
+    state.score = { ok: 0, ko: 0 };
+    saveScore();
+    renderScore();
+  });
+}
+
+function renderScore(){
+  $("#scoreOk").textContent = String(state.score.ok);
+  $("#scoreKo").textContent = String(state.score.ko);
+}
+
+function saveScore(){
+  localStorage.setItem("lp_score", JSON.stringify(state.score));
+}
+
+function loadScore(){
+  const raw = localStorage.getItem("lp_score");
+  if(!raw) return;
+  try{
+    const s = JSON.parse(raw);
+    if(typeof s?.ok === "number" && typeof s?.ko === "number"){
+      state.score = s;
+    }
+  }catch(_){}
+}
+
+function scoreOk(msgEl){
+  state.score.ok++;
+  saveScore();
+  renderScore();
+  setFeedback(msgEl, "✅ ¡Bien!", true);
+}
+
+function scoreKo(msgEl, text){
+  state.score.ko++;
+  saveScore();
+  renderScore();
+  setFeedback(msgEl, `❌ ${text}`, false);
+}
+
+function setFeedback(el, text, ok){
+  el.classList.remove("ok","ko");
+  el.textContent = text || "";
+  if(text) el.classList.add(ok ? "ok" : "ko");
+}
+
+/* ---------- DATA LOADING ---------- */
+
+async function loadAllData(){
+  const [bv, rec, conj] = await Promise.all([
+    fetchJson("./data/bv.json"),
+    fetchJson("./data/recursos.json"),
+    fetchJson("./data/conjugaciones.json")
+  ]);
+
+  state.bv.items = Array.isArray(bv) ? bv : [];
+  state.rec.items = Array.isArray(rec) ? rec : [];
+  state.conj.items = Array.isArray(conj) ? conj : [];
+
+  // defensivo: si está vacío, al menos no crashea
+  if(state.bv.items.length === 0) console.log("bv.json vacío");
+  if(state.rec.items.length === 0) console.log("recursos.json vacío");
+  if(state.conj.items.length === 0) console.log("conjugaciones.json vacío");
+}
+
+async function fetchJson(path){
+  const res = await fetch(path, { cache: "no-store" });
+  if(!res.ok) throw new Error(`No puedo cargar ${path} (${res.status})`);
   return res.json();
 }
 
-function show(el, on) {
-  if (!el) return;
-  el.classList.toggle("hidden", !on);
+/* ---------- BV ---------- */
+
+function bindBV(){
+  $("#btnB").addEventListener("click", () => answerBV("b"));
+  $("#btnV").addEventListener("click", () => answerBV("v"));
+  $("#bvNext").addEventListener("click", () => nextBV());
 }
 
-function setFeedback(el, msg, ok) {
-  if (!el) return;
-  el.textContent = msg;
-  el.classList.remove("hidden");
-  el.classList.toggle("ok", !!ok);
-  el.classList.toggle("bad", !ok);
+function currentBV(){
+  if(state.bv.items.length === 0) return null;
+  return state.bv.items[state.bv.i % state.bv.items.length];
 }
 
-function clearFeedback(el) {
-  if (!el) return;
-  el.classList.add("hidden");
-  el.textContent = "";
-  el.classList.remove("ok", "bad");
-}
+function renderBV(){
+  state.bv.locked = false;
+  setFeedback($("#bvFeedback"), "", true);
 
-function setSelected(groupEl, value) {
-  if (!groupEl) return;
-  groupEl.querySelectorAll("button").forEach((b) => {
-    b.classList.toggle("selected", b.dataset.value === value);
-  });
-}
-
-function buildChoiceButtons(container, values, onPick) {
-  container.innerHTML = "";
-  values.forEach((v) => {
-    const btn = document.createElement("button");
-    btn.type = "button";
-    btn.className = "chip";
-    btn.textContent = v;
-    btn.dataset.value = v;
-    btn.addEventListener("click", () => onPick(v));
-    container.appendChild(btn);
-  });
-}
-
-/* ---------------- Views ---------------- */
-const views = {
-  home: $("#viewHome"),
-  conj: $("#viewConj"),
-  bv: $("#viewBV"),
-  rec: $("#viewRec"),
-};
-
-function go(viewName) {
-  Object.entries(views).forEach(([k, el]) => {
-    el.classList.toggle("active", k === viewName);
-  });
-}
-
-/* ---------------- Global Score ---------------- */
-const score = {
-  totalOk: 0,
-  totalAll: 0,
-
-  conjOk: 0, conjAll: 0,
-  bvOk: 0, bvAll: 0,
-  recOk: 0, recAll: 0,
-};
-
-function renderScores() {
-  $("#globalScore").textContent = `Aciertos: ${score.totalOk} / ${score.totalAll}`;
-  $("#conjScore").textContent = `Aciertos: ${score.conjOk} / ${score.conjAll}`;
-  $("#bvScore").textContent = `Aciertos: ${score.bvOk} / ${score.bvAll}`;
-  $("#recScore").textContent = `Aciertos: ${score.recOk} / ${score.recAll}`;
-}
-
-/* ---------------- HOME wiring ---------------- */
-$("#homeConj").addEventListener("click", () => { go("conj"); conjStart(); });
-$("#homeBV").addEventListener("click", () => { go("bv"); bvStart(); });
-$("#homeRec").addEventListener("click", () => { go("rec"); recStart(); });
-
-$("#btnHome").addEventListener("click", () => go("home"));
-$("#btnListo").addEventListener("click", () => go("home"));
-
-$("#btnReset").addEventListener("click", () => {
-  score.totalOk = score.totalAll = 0;
-  score.conjOk = score.conjAll = 0;
-  score.bvOk = score.bvAll = 0;
-  score.recOk = score.recAll = 0;
-  renderScores();
-});
-
-/* ---------------- CONJUGACIONES ---------------- */
-let conjData = null;
-
-let conjMode = "recon"; // recon | prod
-let conjCurrentRecon = null;
-
-let prodCurrent = null;
-let prodSel = { modo:"", grupo:"", tipo:"", persona:"", numero:"" };
-
-const conjReconBox = $("#conjReconBox");
-const conjProdBox = $("#conjProdBox");
-
-function conjSetMode(mode) {
-  conjMode = mode;
-  show(conjReconBox, mode === "recon");
-  show(conjProdBox, mode === "prod");
-
-  $("#conjTabRecon").classList.toggle("selected", mode === "recon");
-  $("#conjTabProd").classList.toggle("selected", mode === "prod");
-
-  if (mode === "recon") conjNextRecon();
-  else prodNext();
-}
-
-$("#conjTabRecon").addEventListener("click", () => conjSetMode("recon"));
-$("#conjTabProd").addEventListener("click", () => conjSetMode("prod"));
-
-async function conjStart() {
-  try {
-    if (!conjData) conjData = await loadJson(PATHS.conjugaciones);
-  } catch (e) {
-    alert(`Error cargando conjugaciones.json: ${e.message}`);
+  const item = currentBV();
+  if(!item){
+    $("#bvPrompt").textContent = "No hay datos en bv.json";
     return;
   }
-  conjSetMode(conjMode);
-  renderScores();
+  $("#bvPrompt").innerHTML = `Completa: <strong>${escapeHtml(item.pattern)}</strong>`;
 }
 
-function conjPickReconItem() {
-  // Acepta que el JSON sea un array o {items:[...]}
-  const arr = Array.isArray(conjData) ? conjData : (conjData.items || conjData.reconocer || []);
-  return pickRandom(arr);
-}
+function answerBV(letter){
+  if(state.bv.locked) return;
+  const item = currentBV();
+  if(!item) return;
 
-function conjNextRecon() {
-  clearFeedback($("#conjFeedback"));
-  const item = conjPickReconItem();
-  conjCurrentRecon = item;
-
-  const sentence = getField(item, "frase", "sentence", "texto");
-  $("#conjSentence").textContent = sentence || "(frase no encontrada en el JSON)";
-
-  $("#conjInput").value = "";
-  $("#conjInput").focus();
-}
-
-$("#conjNext").addEventListener("click", conjNextRecon);
-
-$("#conjCheck").addEventListener("click", () => {
-  const expected = getField(conjCurrentRecon, "solucion", "answer", "verbo", "forma");
-  const user = $("#conjInput").value;
-
-  const ok = normalizeAnswer(user) === normalizeAnswer(expected);
-
-  score.totalAll++; score.conjAll++;
-  if (ok) { score.totalOk++; score.conjOk++; }
-
-  setFeedback(
-    $("#conjFeedback"),
-    ok ? "¡Correcto!" : `No. La respuesta era: "${expected}"`,
-    ok
-  );
-
-  renderScores();
-});
-
-/* ----- Producir / clasificar ----- */
-
-function conjPickProdItem() {
-  // Reutiliza el mismo JSON: si no hay sección específica, elige elementos que tengan "forma"
-  const arr = Array.isArray(conjData) ? conjData : (conjData.producir || conjData.items || []);
-  // Filtra candidatos con forma (o solucion/answer)
-  const candidates = arr.filter(x => getField(x, "forma", "solucion", "answer"));
-  return candidates.length ? pickRandom(candidates) : pickRandom(arr);
-}
-
-function prodBuildTipoOptions(grupo) {
-  // Grupo en el paso 2: Presente / Pretérito / Futuro / Condicional
-  if (grupo === "Presente") return ["Presente"];
-  if (grupo === "Futuro") return ["Futuro simple", "Futuro compuesto"];
-  if (grupo === "Condicional") return ["Condicional simple", "Condicional compuesto"];
-  if (grupo === "Pretérito") {
-    return [
-      "Imperfecto",
-      "Perfecto simple",
-      "Perfecto compuesto",
-      "Pluscuamperfecto",
-      "Pretérito anterior",
-    ];
+  state.bv.locked = true;
+  if(letter === item.missing){
+    scoreOk($("#bvFeedback"));
+  }else{
+    scoreKo($("#bvFeedback"), `Era “${item.missing}” (palabra: ${item.word})`);
   }
-  return [];
 }
 
-function prodResetSelections() {
-  prodSel = { modo:"", grupo:"", tipo:"", persona:"", numero:"" };
-  ["#prodModo","#prodGrupo","#prodTipo","#prodPersona","#prodNumero"].forEach(sel => {
-    const el = $(sel);
-    if (el) el.querySelectorAll("button").forEach(b => b.classList.remove("selected"));
-  });
+function nextBV(){
+  state.bv.i++;
+  renderBV();
 }
 
-function prodRenderChoices() {
-  // 1) Modo
-  buildChoiceButtons($("#prodModo"), ["Indicativo","Subjuntivo","Imperativo"], (v) => {
-    prodSel.modo = v;
-    setSelected($("#prodModo"), v);
-  });
+/* ---------- RECURSOS ---------- */
 
-  // 2) Grupo
-  buildChoiceButtons($("#prodGrupo"), ["Presente","Pretérito","Futuro","Condicional"], (v) => {
-    prodSel.grupo = v;
-    setSelected($("#prodGrupo"), v);
-
-    // Al cambiar grupo, rehacer Tipo (3)
-    prodSel.tipo = "";
-    const tipos = prodBuildTipoOptions(v);
-    buildChoiceButtons($("#prodTipo"), tipos, (t) => {
-      prodSel.tipo = t;
-      setSelected($("#prodTipo"), t);
-    });
-  });
-
-  // 3) Tipo empieza vacío hasta elegir grupo
-  $("#prodTipo").innerHTML = `<span class="muted">Elige antes el paso 2.</span>`;
-
-  // Persona / número
-  buildChoiceButtons($("#prodPersona"), ["1ª","2ª","3ª"], (v) => {
-    prodSel.persona = v;
-    setSelected($("#prodPersona"), v);
-  });
-  buildChoiceButtons($("#prodNumero"), ["Singular","Plural"], (v) => {
-    prodSel.numero = v;
-    setSelected($("#prodNumero"), v);
-  });
+function bindRecursos(){
+  $("#recNext").addEventListener("click", () => nextRec());
 }
 
-function prodNext() {
-  clearFeedback($("#prodFeedback"));
-  prodResetSelections();
-  prodRenderChoices();
-
-  prodCurrent = conjPickProdItem();
-
-  // “forma” es lo que se muestra para clasificar
-  const forma = getField(prodCurrent, "forma", "solucion", "answer");
-  $("#prodForma").textContent = forma || "(sin forma en el JSON)";
+function currentRec(){
+  if(state.rec.items.length === 0) return null;
+  return state.rec.items[state.rec.i % state.rec.items.length];
 }
 
-$("#prodNext").addEventListener("click", prodNext);
+function renderRec(){
+  state.rec.locked = false;
+  setFeedback($("#recFeedback"), "", true);
 
-function normalizeLabel(s) {
-  return String(s || "").trim();
-}
-
-$("#prodCheck").addEventListener("click", () => {
-  // Esperados desde JSON (si existen). Si no existen, no podemos corregir: avisamos.
-  const exp = {
-    modo: normalizeLabel(getField(prodCurrent, "modo")),
-    grupo: normalizeLabel(getField(prodCurrent, "grupo", "tiempo", "grupoTiempo")),
-    tipo: normalizeLabel(getField(prodCurrent, "tipo", "subtipo")),
-    persona: normalizeLabel(getField(prodCurrent, "persona")),
-    numero: normalizeLabel(getField(prodCurrent, "numero")),
-  };
-
-  // Si el JSON no tiene metadatos, no hay forma fiable de corregir
-  const hasMeta = Object.values(exp).some(v => v);
-  if (!hasMeta) {
-    setFeedback(
-      $("#prodFeedback"),
-      "Este ítem no tiene modo/tiempo/persona/número en el JSON, así que no se puede corregir. (Añade esos campos en conjugaciones.json).",
-      false
-    );
+  const item = currentRec();
+  if(!item){
+    $("#recText").textContent = "No hay datos en recursos.json";
+    $("#recOptions").innerHTML = "";
     return;
   }
 
-  // Reglas del paso 3: si grupo es Presente, tipo debe ser Presente (o vacío)
-  let ok =
-    (!exp.modo || prodSel.modo === exp.modo) &&
-    (!exp.grupo || prodSel.grupo === exp.grupo) &&
-    (!exp.tipo || prodSel.tipo === exp.tipo) &&
-    (!exp.persona || prodSel.persona === exp.persona) &&
-    (!exp.numero || prodSel.numero === exp.numero);
-
-  score.totalAll++; score.conjAll++;
-  if (ok) { score.totalOk++; score.conjOk++; }
-
-  setFeedback(
-    $("#prodFeedback"),
-    ok ? "¡Correcto!" : `No. Esperado: ${JSON.stringify(exp)}`,
-    ok
-  );
-  renderScores();
-});
-
-/* ---------------- BV ---------------- */
-let bvData = null;
-let bvCurrent = null;
-
-async function bvStart() {
-  try {
-    if (!bvData) bvData = await loadJson(PATHS.bv);
-  } catch (e) {
-    alert(`Error cargando bv.json: ${e.message}`);
-    return;
-  }
-  bvNext();
-  renderScores();
-}
-
-function bvMaskFromItem(item) {
-  // Soporta varias formas:
-  // 1) {masked:"b_scar", pick:"b", correct:"buscar"}
-  // 2) {word:"buscar", missing:"b"} -> "_uscar"
-  // 3) {texto:"b_scar", correcta:"buscar"} etc.
-  const masked = getField(item, "masked", "texto", "mask");
-  const correct = getField(item, "correct", "correcta", "word", "palabra");
-  const missing = getField(item, "pick", "missing", "letra");
-
-  if (masked) {
-    return {
-      masked,
-      pick: missing || (masked.includes("_") ? null : null),
-      correct: correct || "",
-    };
-  }
-
-  if (correct && missing) {
-    const m = correct.replace(new RegExp(missing, "i"), "_");
-    return { masked: m, pick: missing.toLowerCase(), correct };
-  }
-
-  // fallback: si solo hay word, no se puede
-  return { masked: correct || "(sin datos)", pick: "", correct: correct || "" };
-}
-
-function bvNext() {
-  clearFeedback($("#bvFeedback"));
-  const arr = Array.isArray(bvData) ? bvData : (bvData.items || []);
-  bvCurrent = pickRandom(arr);
-
-  const info = bvMaskFromItem(bvCurrent);
-  $("#bvWord").textContent = info.masked;
-}
-
-$("#bvNext").addEventListener("click", bvNext);
-
-function bvAnswer(letter) {
-  const info = bvMaskFromItem(bvCurrent);
-  const expectedLetter = (info.pick || "").toLowerCase();
-
-  // Si no hay expectedLetter, intentamos deducirlo comparando masked->correct
-  let exp = expectedLetter;
-  if (!exp && info.masked.includes("_") && info.correct) {
-    // buscamos la letra que llena el hueco
-    const i = info.masked.indexOf("_");
-    exp = info.correct[i]?.toLowerCase() || "";
-  }
-
-  const ok = letter.toLowerCase() === exp;
-
-  score.totalAll++; score.bvAll++;
-  if (ok) { score.totalOk++; score.bvOk++; }
-
-  setFeedback(
-    $("#bvFeedback"),
-    ok ? "¡Correcto!" : `No. Era "${exp}".`,
-    ok
-  );
-  renderScores();
-}
-
-$("#bvB").addEventListener("click", () => bvAnswer("b"));
-$("#bvV").addEventListener("click", () => bvAnswer("v"));
-
-/* ---------------- RECURSOS ---------------- */
-let recData = null;
-let recCurrent = null;
-
-async function recStart() {
-  try {
-    if (!recData) recData = await loadJson(PATHS.recursos);
-  } catch (e) {
-    alert(`Error cargando recursos.json: ${e.message}`);
-    return;
-  }
-  recNext();
-  renderScores();
-}
-
-function recNext() {
-  clearFeedback($("#recFeedback"));
-
-  const arr = Array.isArray(recData) ? recData : (recData.items || recData.recursos || []);
-  recCurrent = pickRandom(arr);
-
-  const text = getField(recCurrent, "texto", "frase", "sentence");
-  $("#recText").textContent = text || "(texto no encontrado en el JSON)";
-
-  const options =
-    recCurrent.opciones ||
-    recCurrent.options ||
-    recCurrent.choices ||
-    [];
-
-  const correct = getField(recCurrent, "correcta", "correct", "answer");
-
-  const box = $("#recButtons");
+  $("#recText").textContent = item.text;
+  const box = $("#recOptions");
   box.innerHTML = "";
 
-  if (!options.length) {
-    box.innerHTML = `<span class="muted">No hay opciones en recursos.json (campo "opciones").</span>`;
-    return;
-  }
-
-  options.forEach((opt) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.className = "chip";
-    b.textContent = opt;
-    b.addEventListener("click", () => {
-      const ok = normalizeAnswer(opt) === normalizeAnswer(correct);
-
-      score.totalAll++; score.recAll++;
-      if (ok) { score.totalOk++; score.recOk++; }
-
-      setFeedback(
-        $("#recFeedback"),
-        ok ? "¡Correcto!" : `No. Era "${correct}".`,
-        ok
-      );
-
-      renderScores();
-    });
-    box.appendChild(b);
+  (item.options || []).forEach(opt => {
+    const btn = document.createElement("button");
+    btn.textContent = opt;
+    btn.className = "choice";
+    btn.addEventListener("click", () => answerRec(opt));
+    box.appendChild(btn);
   });
 }
 
-$("#recNext").addEventListener("click", recNext);
+function answerRec(opt){
+  if(state.rec.locked) return;
+  const item = currentRec();
+  if(!item) return;
 
-/* ---------------- Boot ---------------- */
-go("home");
-renderScores();
+  state.rec.locked = true;
+  if(opt === item.answer){
+    scoreOk($("#recFeedback"));
+  }else{
+    scoreKo($("#recFeedback"), `Respuesta correcta: ${item.answer}`);
+  }
+}
+
+function nextRec(){
+  state.rec.i++;
+  renderRec();
+}
+
+/* ---------- CONJ: Tabs ---------- */
+
+function bindConjTabs(){
+  $all(".tab").forEach(btn => {
+    btn.addEventListener("click", () => setConjTab(btn.dataset.tab));
+  });
+}
+
+function setConjTab(tab){
+  $all(".tab").forEach(b => b.classList.toggle("active", b.dataset.tab === tab));
+  const rec = $("#conjReconocer");
+  const prod = $("#conjProducir");
+  const isRec = tab === "reconocer";
+  rec.hidden = !isRec;
+  prod.hidden = isRec;
+
+  if(isRec) renderConjReconocer();
+  else renderConjProducir();
+}
+
+/* ---------- CONJ: Util ---------- */
+
+function currentConjForRec(){
+  if(state.conj.items.length === 0) return null;
+  return state.conj.items[state.conj.iRec % state.conj.items.length];
+}
+function currentConjForProd(){
+  if(state.conj.items.length === 0) return null;
+  return state.conj.items[state.conj.iProd % state.conj.items.length];
+}
+
+function norm(s){
+  return String(s ?? "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/\p{Diacritic}/gu, "")   // quita tildes
+    .replace(/\s+/g, " ");
+}
+
+function conjHelpText(item){
+  if(!item) return "";
+  return [
+    `Forma: ${item.forma}`,
+    `Verbo: ${item.verbo}`,
+    `Pronombre: ${item.pronombre}`,
+    `Modo: ${item.modo}`,
+    `Grupo: ${item.grupo}`,
+    `Tipo: ${item.tipo}`,
+    `Persona/Número: ${item.persona} ${item.numero}`
+  ].join("\n");
+}
+
+/* ---------- CONJ: Reconocer ---------- */
+
+function bindConjReconocer(){
+  $("#cjCheckRec").addEventListener("click", checkConjReconocer);
+  $("#cjNextRec").addEventListener("click", () => { state.conj.iRec++; renderConjReconocer(); });
+
+  $("#cjHelpRec").addEventListener("click", () => {
+    const box = $("#cjHelpBoxRec");
+    box.hidden = !box.hidden;
+  });
+}
+
+function renderConjReconocer(){
+  state.conj.lockedRec = false;
+  setFeedback($("#cjFeedbackRec"), "", true);
+
+  const item = currentConjForRec();
+  if(!item){
+    $("#cjForma").textContent = "—";
+    $("#cjHelpBoxRec").hidden = true;
+    $("#cjHelpBoxRec").textContent = "";
+    return;
+  }
+
+  $("#cjForma").textContent = item.forma;
+
+  // reset inputs
+  $("#cjModo").value = "";
+  $("#cjGrupo").value = "";
+  $("#cjTipo").value = "";
+  $("#cjPersona").value = "";
+  $("#cjNumero").value = "";
+
+  $("#cjHelpBoxRec").hidden = true;
+  $("#cjHelpBoxRec").textContent = conjHelpText(item);
+}
+
+function checkConjReconocer(){
+  if(state.conj.lockedRec) return;
+  const item = currentConjForRec();
+  if(!item) return;
+
+  state.conj.lockedRec = true;
+
+  const modo = $("#cjModo").value;
+  const grupo = $("#cjGrupo").value;
+  const tipo = $("#cjTipo").value;
+  const persona = $("#cjPersona").value;
+  const numero = $("#cjNumero").value;
+
+  const ok =
+    norm(modo) === norm(item.modo) &&
+    norm(grupo) === norm(item.grupo) &&
+    norm(tipo) === norm(item.tipo) &&
+    norm(persona) === norm(item.persona) &&
+    norm(numero) === norm(item.numero);
+
+  if(ok){
+    scoreOk($("#cjFeedbackRec"));
+  }else{
+    scoreKo($("#cjFeedbackRec"), `Correcto: ${item.modo} · ${item.grupo} · ${item.tipo} · ${item.persona} ${item.numero}`);
+  }
+}
+
+/* ---------- CONJ: Producir ---------- */
+
+function bindConjProducir(){
+  $("#cjCheckProd").addEventListener("click", checkConjProducir);
+  $("#cjNextProd").addEventListener("click", () => { state.conj.iProd++; renderConjProducir(); });
+
+  $("#cjHelpProd").addEventListener("click", () => {
+    const box = $("#cjHelpBoxProd");
+    box.hidden = !box.hidden;
+  });
+}
+
+function renderConjProducir(){
+  state.conj.lockedProd = false;
+  setFeedback($("#cjFeedbackProd"), "", true);
+
+  const item = currentConjForProd();
+  if(!item){
+    $("#cjPromptProd").textContent = "No hay datos en conjugaciones.json";
+    $("#cjHelpBoxProd").hidden = true;
+    $("#cjHelpBoxProd").textContent = "";
+    return;
+  }
+
+  const prompt = `${item.persona}ª persona ${item.numero.toLowerCase()} del ${item.tipo.toLowerCase()} de ${item.modo.toLowerCase()} de “${item.verbo}”`;
+  $("#cjPromptProd").textContent = prompt;
+
+  $("#cjAnswerProd").value = "";
+  $("#cjHelpBoxProd").hidden = true;
+  $("#cjHelpBoxProd").textContent = conjHelpText(item);
+}
+
+function checkConjProducir(){
+  if(state.conj.lockedProd) return;
+  const item = currentConjForProd();
+  if(!item) return;
+
+  state.conj.lockedProd = true;
+
+  const ans = norm($("#cjAnswerProd").value);
+
+  // Aceptamos dos formas:
+  // 1) solo la forma ("cantaba")
+  // 2) pronombre + forma ("el cantaba") sin tildes (por norm)
+  const expected1 = norm(item.forma);
+  const expected2 = norm(`${item.pronombre} ${item.forma}`);
+
+  if(ans === expected1 || ans === expected2){
+    scoreOk($("#cjFeedbackProd"));
+  }else{
+    scoreKo($("#cjFeedbackProd"), `Era: “${item.pronombre} ${item.forma}” (o solo “${item.forma}”)`);
+  }
+}
+
+/* ---------- Helpers ---------- */
+
+function escapeHtml(s){
+  return String(s ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
