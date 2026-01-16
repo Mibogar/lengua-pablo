@@ -1,9 +1,9 @@
-/* Service Worker (v4)
-   - Precacha SOLO el “core” de la app
-   - Para /data/*.json usa NETWORK-FIRST (si no hay red, usa caché)
+/* Service Worker (v5)
+   - Core assets: stale-while-revalidate (carga rápido y se actualiza solo)
+   - /data/*.json: network-first
 */
 
-const CACHE = "lengua-pablo-v4";
+const CACHE = "lengua-pablo-v5";
 
 const CORE_ASSETS = [
   "./",
@@ -35,36 +35,48 @@ self.addEventListener("activate", (event) => {
   );
 });
 
+async function staleWhileRevalidate(req) {
+  const cache = await caches.open(CACHE);
+  const cached = await cache.match(req);
+  const fetchPromise = fetch(req)
+    .then((res) => {
+      cache.put(req, res.clone());
+      return res;
+    })
+    .catch(() => null);
+
+  return cached || (await fetchPromise) || new Response("Offline", { status: 503 });
+}
+
+async function networkFirst(req) {
+  const cache = await caches.open(CACHE);
+  try {
+    const fresh = await fetch(req);
+    cache.put(req, fresh.clone());
+    return fresh;
+  } catch {
+    const cached = await cache.match(req);
+    return cached || new Response("Offline", { status: 503 });
+  }
+}
+
 self.addEventListener("fetch", (event) => {
   const req = event.request;
   if (req.method !== "GET") return;
 
   const url = new URL(req.url);
 
+  // GitHub Pages base path
+  const isApp = url.pathname.includes("/lengua-pablo/");
+
+  if (!isApp) return;
+
   // DATA: network-first
-  if (url.pathname.includes("/lengua-pablo/") && url.pathname.includes("/data/")) {
-    event.respondWith(
-      (async () => {
-        const cache = await caches.open(CACHE);
-        try {
-          const fresh = await fetch(req);
-          cache.put(req, fresh.clone());
-          return fresh;
-        } catch {
-          const cached = await cache.match(req);
-          return cached || new Response("Offline", { status: 503 });
-        }
-      })()
-    );
+  if (url.pathname.includes("/data/")) {
+    event.respondWith(networkFirst(req));
     return;
   }
 
-  // CORE: cache-first
-  event.respondWith(
-    (async () => {
-      const cached = await caches.match(req);
-      return cached || fetch(req);
-    })()
-  );
+  // CORE: stale-while-revalidate
+  event.respondWith(staleWhileRevalidate(req));
 });
-
