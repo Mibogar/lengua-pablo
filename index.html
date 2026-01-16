@@ -4,147 +4,160 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>Lengua — Pablo</title>
-  <link rel="stylesheet" href="styles.css?v=20260116-2325">
-  <script>
-    // Cambia esto cuando subas a GitHub para forzar recarga real
-    window.APP_VERSION = "20260116-2325";
-  </script>
+  <link rel="stylesheet" href="./styles.css" />
+  <!-- (Opcional PWA) -->
+  <link rel="manifest" href="./manifest.webmanifest" />
 </head>
 
 <body>
-  <div class="app">
-    <header>
-      <div class="brand">
-        <div>
-          <h1>Lengua</h1>
-          <div class="badge muted">Elige qué estudiar</div>
+  <header class="topbar">
+    <h1>Lengua — Pablo</h1>
+    <div class="scorebox">
+      <span>✅ <strong id="scoreOk">0</strong></span>
+      <span>❌ <strong id="scoreKo">0</strong></span>
+    </div>
+  </header>
+
+  <main class="app">
+    <!-- HOME -->
+    <section id="home" class="view active">
+      <h2>Elige un módulo</h2>
+      <div class="grid">
+        <button class="big" data-go="bv">b / v</button>
+        <button class="big" data-go="recursos">Recursos literarios</button>
+        <button class="big" data-go="conj">Conjugaciones</button>
+      </div>
+
+      <div class="card">
+        <p class="muted">
+          Consejo: si algo “no se puede clicar”, abre la consola (F12) y mira si hay un error JS o si app.js no carga.
+        </p>
+      </div>
+    </section>
+
+    <!-- BV -->
+    <section id="bv" class="view">
+      <h2>b / v</h2>
+
+      <div class="card">
+        <div class="prompt" id="bvPrompt">Cargando…</div>
+        <div class="row">
+          <button class="choice" id="btnB">b</button>
+          <button class="choice" id="btnV">v</button>
+        </div>
+        <div class="feedback" id="bvFeedback"></div>
+        <div class="row">
+          <button class="secondary" id="bvNext">Siguiente</button>
         </div>
       </div>
-      <button id="btnListo" class="small ghost" type="button">Listo</button>
-    </header>
+    </section>
 
-    <!-- HOME -->
-    <section id="viewHome" class="view active">
+    <!-- RECURSOS -->
+    <section id="recursos" class="view">
+      <h2>Recursos literarios</h2>
+
       <div class="card">
-        <div class="label">Elige qué estudiar</div>
-        <div class="grid">
-          <button id="homeConj" class="primary" type="button">Conjugaciones verbales</button>
-          <button id="homeBV" type="button">Ortografía: b / v</button>
-          <button id="homeRec" type="button">Recursos literarios</button>
+        <div class="prompt" id="recText">Cargando…</div>
+        <div class="options" id="recOptions"></div>
+        <div class="feedback" id="recFeedback"></div>
+        <div class="row">
+          <button class="secondary" id="recNext">Siguiente</button>
         </div>
       </div>
     </section>
 
     <!-- CONJUGACIONES -->
-    <section id="viewConj" class="view">
-      <div class="card">
-        <div class="row space">
-          <div>
-            <h2 style="margin:0">Conjugaciones</h2>
-            <div class="muted" style="margin-top:4px">Reconocer o clasificar una forma verbal</div>
-          </div>
-          <div class="row">
-            <button id="conjTabRecon" class="small" type="button">Reconocer</button>
-            <button id="conjTabProd" class="small" type="button">Producir</button>
-          </div>
+    <section id="conj" class="view">
+      <h2>Conjugaciones</h2>
+
+      <div class="tabs">
+        <button class="tab active" data-tab="reconocer">Reconocer</button>
+        <button class="tab" data-tab="producir">Producir</button>
+      </div>
+
+      <!-- Reconocer: mostrar forma y clasificar -->
+      <div id="conjReconocer" class="card">
+        <div class="prompt">
+          Forma: <strong id="cjForma">…</strong>
         </div>
 
-        <div class="hr"></div>
+        <div class="formgrid">
+          <label>Modo
+            <select id="cjModo">
+              <option value="">—</option>
+              <option>Indicativo</option>
+              <option>Subjuntivo</option>
+              <option>Imperativo</option>
+            </select>
+          </label>
 
-        <!-- Reconocer -->
-        <div id="conjReconBox">
-          <div class="sentence" id="conjSentence"></div>
-          <div class="row" style="margin-top:10px">
-            <input id="conjInput" type="text" placeholder="Escribe la forma verbal exacta" />
-            <button id="conjCheck" class="primary" type="button">Comprobar</button>
-            <button id="conjNext" type="button">Siguiente</button>
-          </div>
-          <div id="conjFeedback" class="feedback hidden"></div>
-          <div class="footerNote">Fíjate en la frase y copia la forma verbal tal cual aparece.</div>
+          <label>Grupo
+            <select id="cjGrupo">
+              <option value="">—</option>
+              <option>Presente</option>
+              <option>Pretérito</option>
+              <option>Futuro</option>
+              <option>Condicional</option>
+            </select>
+          </label>
+
+          <label>Tipo
+            <input id="cjTipo" placeholder="Ej: Imperfecto" />
+          </label>
+
+          <label>Persona
+            <select id="cjPersona">
+              <option value="">—</option>
+              <option value="1">1</option>
+              <option value="2">2</option>
+              <option value="3">3</option>
+            </select>
+          </label>
+
+          <label>Número
+            <select id="cjNumero">
+              <option value="">—</option>
+              <option>Singular</option>
+              <option>Plural</option>
+            </select>
+          </label>
         </div>
 
-        <!-- Producir (clasificar forma) -->
-        <div id="conjProdBox" class="hidden">
-          <div class="label">Forma:</div>
-          <div class="word" id="prodForma"></div>
-
-          <div class="label">1) Modo</div>
-          <div class="choices" id="prodModo"></div>
-
-          <div class="label">2) Tiempo (grupo)</div>
-          <div class="choices" id="prodGrupo"></div>
-
-          <div class="label">3) Tipo exacto (depende del 2)</div>
-          <div class="choices" id="prodTipo"></div>
-
-          <div class="label">Persona</div>
-          <div class="choices" id="prodPersona"></div>
-
-          <div class="label">Número</div>
-          <div class="choices" id="prodNumero"></div>
-
-          <div class="row" style="margin-top:12px">
-            <button id="prodCheck" class="primary" type="button">Comprobar</button>
-            <button id="prodNext" type="button">Siguiente</button>
-          </div>
-
-          <div id="prodFeedback" class="feedback hidden"></div>
+        <div class="row">
+          <button class="primary" id="cjCheckRec">Comprobar</button>
+          <button class="secondary" id="cjNextRec">Siguiente</button>
+          <button class="help" id="cjHelpRec">Ayuda</button>
         </div>
 
-        <div class="hr"></div>
-        <div class="muted" id="conjScore">Aciertos: 0 / 0</div>
+        <div class="helpbox" id="cjHelpBoxRec" hidden></div>
+        <div class="feedback" id="cjFeedbackRec"></div>
+      </div>
+
+      <!-- Producir: dar etiquetas y escribir forma (incluye verbo) -->
+      <div id="conjProducir" class="card" hidden>
+        <div class="prompt" id="cjPromptProd">…</div>
+
+        <label>Respuesta (ej: “él cantaba” o “cantaba”)
+          <input id="cjAnswerProd" placeholder="Escribe aquí" />
+        </label>
+
+        <div class="row">
+          <button class="primary" id="cjCheckProd">Comprobar</button>
+          <button class="secondary" id="cjNextProd">Siguiente</button>
+          <button class="help" id="cjHelpProd">Ayuda</button>
+        </div>
+
+        <div class="helpbox" id="cjHelpBoxProd" hidden></div>
+        <div class="feedback" id="cjFeedbackProd"></div>
       </div>
     </section>
+  </main>
 
-    <!-- BV -->
-    <section id="viewBV" class="view">
-      <div class="card">
-        <h2 style="margin:0">Uso de b / v</h2>
-        <div class="label">Completa la palabra:</div>
-        <div class="word" id="bvWord"></div>
+  <footer class="footer">
+    <button class="secondary" data-go="home">Inicio</button>
+    <button class="danger" id="resetScore">Reiniciar marcador</button>
+  </footer>
 
-        <div class="row" style="margin-top:10px">
-          <button id="bvB" class="chip" type="button">b</button>
-          <button id="bvV" class="chip" type="button">v</button>
-          <button id="bvNext" type="button">Siguiente</button>
-        </div>
-
-        <div id="bvFeedback" class="feedback hidden"></div>
-
-        <div class="hr"></div>
-        <div class="muted" id="bvScore">Aciertos: 0 / 0</div>
-      </div>
-    </section>
-
-    <!-- RECURSOS -->
-    <section id="viewRec" class="view">
-      <div class="card">
-        <h2 style="margin:0">Recursos literarios</h2>
-        <div class="sentence" id="recText"></div>
-
-        <div class="label">Elige el recurso:</div>
-        <div class="choices" id="recButtons"></div>
-
-        <div class="row" style="margin-top:12px">
-          <button id="recNext" type="button">Siguiente</button>
-        </div>
-
-        <div id="recFeedback" class="feedback hidden"></div>
-
-        <div class="hr"></div>
-        <div class="muted" id="recScore">Aciertos: 0 / 0</div>
-      </div>
-    </section>
-
-    <div class="footer">
-      <button id="btnHome" class="link" type="button">Inicio</button>
-      <span class="sep">·</span>
-      <button id="btnReset" class="link" type="button">Reiniciar marcador</button>
-      <span class="sep">·</span>
-      <span id="globalScore">Aciertos: 0 / 0</span>
-    </div>
-  </div>
-
-  <script src="app.js?v=20260116-2325"></script>
+  <script src="./app.js?v=20260116-1" defer></script>
 </body>
 </html>
