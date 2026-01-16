@@ -4,100 +4,116 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Lengua — Pablo</title>
-  <link rel="manifest" href="manifest.json" />
-  <meta name="theme-color" content="#121218" />
-  <link rel="icon" href="icons/icon-192.png" />
-  <link rel="stylesheet" href="styles.css" />
+
+  <link rel="manifest" href="manifest.json?v=5">
+  <link rel="stylesheet" href="styles.css?v=5">
+  <meta name="theme-color" content="#0b0d14">
 </head>
+
 <body>
   <div class="app">
     <header class="header">
       <div>
         <h1>Lengua</h1>
-        <p class="sub">Elige qué estudiar <span id="modeTitle"></span></p>
+        <div class="subtitle">
+          Elige qué estudiar<span id="modeTitle"></span>
+        </div>
       </div>
       <div class="pill" id="pill-status">Listo</div>
     </header>
 
-    <div id="feedback" class="feedback" style="display:none"></div>
+    <div id="feedback" class="feedback" style="display:none;"></div>
 
     <main>
+      <!-- HOME -->
       <section id="home" class="view active">
         <div class="card">
           <h2>¿Qué vamos a estudiar?</h2>
-          <div class="grid">
-            <button id="homeConj" class="btn primary" type="button">Conjugaciones verbales</button>
-            <button id="homeBV" class="btn" type="button">Uso de b / v</button>
-            <button id="homeRec" class="btn" type="button">Recursos literarios</button>
+          <div class="choiceGrid">
+            <button id="homeConj" class="btn primary">Conjugaciones verbales</button>
+            <button id="homeBV" class="btn">Uso de b / v</button>
+            <button id="homeRec" class="btn">Recursos literarios</button>
           </div>
-          <p class="hint">Tip: escribe siempre el verbo tal como aparece en la frase. La app no distingue mayúsculas.</p>
+          <div class="footerNote">Tip: la app no distingue mayúsculas ni tildes.</div>
         </div>
       </section>
 
+      <!-- CONJUGACIONES -->
       <section id="conjugaciones" class="view">
         <div class="card">
           <h2>Conjugaciones</h2>
+
           <p class="sentence" id="conjSentence"></p>
 
-          <div id="conjVerbArea" class="row">
-            <input id="conjInput" class="input" placeholder="Escribe el verbo (o grupo verbal)" />
-            <button id="conjCheck" class="btn primary" type="button">Comprobar</button>
+          <div class="row">
+            <input id="conjInput" type="text" placeholder="Escribe el verbo (o grupo verbal)" />
+            <button id="conjCheck" class="btn primary">Comprobar</button>
           </div>
-          <p class="hint" id="conjHint"></p>
 
-          <div id="conjClassify" style="display:none"></div>
+          <div class="hint" id="conjHint"></div>
 
-          <div class="row" style="justify-content:flex-end">
-            <button id="conjNext" class="btn" type="button">Siguiente</button>
+          <div id="conjClassify" style="display:none;"></div>
+
+          <div class="row row-right">
+            <button id="conjNext" class="btn">Siguiente</button>
           </div>
         </div>
       </section>
 
+      <!-- B/V -->
       <section id="bv" class="view">
         <div class="card">
           <h2>Uso de b / v</h2>
-          <p class="sentence">Completa la palabra:</p>
-          <p class="word" id="bvWord"></p>
-          <p class="hint" id="bvReveal"></p>
-          <div class="row" id="bvButtons">
-            <button id="bvB" class="btn primary" type="button">b</button>
-            <button id="bvV" class="btn primary" type="button">v</button>
-            <button id="bvNext" class="btn" type="button">Siguiente</button>
+          <p>Completa la palabra:</p>
+
+          <div class="word" id="bvWord"></div>
+          <div class="hint" id="bvReveal"></div>
+
+          <div class="row">
+            <button id="bvB" class="btn primary">b</button>
+            <button id="bvV" class="btn primary">v</button>
+            <button id="bvNext" class="btn">Siguiente</button>
           </div>
         </div>
       </section>
 
+      <!-- RECURSOS -->
       <section id="recursos" class="view">
         <div class="card">
-          <h2>Recursos literarios <span class="pill" id="recMode">Teoría</span></h2>
+          <div class="row" style="align-items:center; justify-content:space-between;">
+            <h2 style="margin:0;">Recursos literarios <span id="recMode">Teoría</span></h2>
+          </div>
+
           <div class="row">
-            <button id="recTheory" class="btn" type="button">Teoría</button>
-            <button id="recPractice" class="btn" type="button">Práctica</button>
+            <button id="recTheory" class="btn">Teoría</button>
+            <button id="recPractice" class="btn">Práctica</button>
           </div>
+
           <p class="sentence" id="recPrompt"></p>
-          <div class="grid" id="recButtons" style="margin-top:8px">
-            <button class="btn" type="button" data-recurso="Metáfora">Metáfora</button>
-            <button class="btn" type="button" data-recurso="Símil">Símil</button>
-            <button class="btn" type="button" data-recurso="Personificación">Personificación</button>
-            <button class="btn" type="button" data-recurso="Hipérbole">Hipérbole</button>
+
+          <div id="recButtons" class="choices">
+            <button class="chip" data-recurso="metáfora">Metáfora</button>
+            <button class="chip" data-recurso="símil">Símil</button>
+            <button class="chip" data-recurso="personificación">Personificación</button>
+            <button class="chip" data-recurso="hipérbole">Hipérbole</button>
           </div>
-          <div class="row" style="justify-content:flex-end">
-            <button id="recNext" class="btn" type="button">Siguiente</button>
+
+          <div class="row row-right">
+            <button id="recNext" class="btn">Siguiente</button>
           </div>
         </div>
       </section>
     </main>
 
     <footer class="footer">
-      <button class="link" id="btn-home" type="button">Inicio</button>
+      <button id="btn-home" class="link">Inicio</button>
       <span class="sep">·</span>
-      <button class="link" id="btn-reset" type="button">Reiniciar marcador</button>
+      <button id="btn-reset" class="link">Reiniciar marcador</button>
       <span class="sep">·</span>
-      <span class="muted" id="score"></span>
+      <span id="score">Aciertos: 0 / 0</span>
     </footer>
   </div>
 
-  <script src="app.js"></script>
+  <script src="app.js?v=5"></script>
 </body>
 </html>
-
