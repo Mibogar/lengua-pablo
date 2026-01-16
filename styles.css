@@ -184,4 +184,6 @@ input::placeholder{ color: rgba(233,236,255,.5); }
   padding:12px;
   border-top:1px solid var(--border);
   background: rgba(11,16,32,.92);
-  backdrop-filter: blur
+  backdrop-filter: blur(8px);
+  z-index: 6;
+}
