@@ -1,384 +1,457 @@
-// Lengua — Pablo (front-end only)
+/* Lengua — Pablo (GitHub Pages / PWA)
+   Compatible con el index.html actual (ids: home, conjugaciones, bv, recursos...)
+*/
 
-// --- Utilities ---
-function $(sel){ return document.querySelector(sel); }
-function $all(sel){ return Array.from(document.querySelectorAll(sel)); }
+const PATHS = {
+  conjugaciones: "data/conjugaciones.json",
+  bv: "data/bv.json",
+  recursos: "data/recursos.json",
+};
 
-function normalizeAnswer(s){
-  // Case-insensitive + trim + collapse spaces + remove accents
-  if (s == null) return '';
-  return s
-    .toString()
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+function stripDiacritics(s) {
+  return (s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+
+function normalizeAnswer(s) {
+  return stripDiacritics(String(s ?? ""))
     .trim()
-    .replace(/\s+/g,' ')
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{Diacritic}/gu,'');
+    .replace(/\s+/g, " ")
+    .toLowerCase();
 }
 
-function choice(arr){
-  return arr[Math.floor(Math.random()*arr.length)];
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
 }
 
-function setView(id){
-  $all('.view').forEach(v=>v.classList.remove('active'));
-  $(id).classList.add('active');
-}
-
-function flash(msg, ok){
-  const el = $('#feedback');
+function showFeedback(msg, kind = "ok") {
+  const el = $("#feedback");
+  if (!el) return;
+  el.style.display = "block";
+  el.className = `feedback ${kind}`;
   el.textContent = msg;
-  el.className = ok ? 'feedback ok' : 'feedback bad';
-  el.style.display = 'block';
 }
 
-function clearFeedback(){
-  const el = $('#feedback');
-  el.textContent = '';
-  el.className = 'feedback';
-  el.style.display = 'none';
+function hideFeedback() {
+  const el = $("#feedback");
+  if (!el) return;
+  el.style.display = "none";
+  el.textContent = "";
+  el.className = "feedback";
 }
 
-// --- Data loading ---
+function setModeTitle(txt) {
+  const el = $("#modeTitle");
+  if (el) el.textContent = txt ? ` ${txt}` : "";
+}
+
+function setPill(txt) {
+  const el = $("#pill-status");
+  if (el) el.textContent = txt || "Listo";
+}
+
+function setView(id) {
+  hideFeedback();
+  $$(".view").forEach((v) => v.classList.remove("active"));
+  const el = document.getElementById(id);
+  if (el) el.classList.add("active");
+}
+
+const score = {
+  correct: 0,
+  total: 0,
+};
+function updateScore() {
+  const el = $("#score");
+  if (el) el.textContent = `Aciertos: ${score.correct} / ${score.total}`;
+}
+function resetScore() {
+  score.correct = 0;
+  score.total = 0;
+  updateScore();
+  showFeedback("Marcador reiniciado.", "ok");
+}
+
+/* ====== DATA ====== */
 let DATA = {
   conjugaciones: [],
   bv: [],
-  recursos: []
+  recursos: [],
 };
 
-async function loadData(){
-  const [c,b,r] = await Promise.all([
-    fetch('data/conjugaciones.json').then(x=>x.json()),
-    fetch('data/bv.json').then(x=>x.json()),
-    fetch('data/recursos.json').then(x=>x.json())
-  ]);
-  DATA.conjugaciones = c;
-  DATA.bv = b;
-  DATA.recursos = r;
+async function loadJson(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`No se pudo cargar ${url} (${res.status})`);
+  return res.json();
 }
 
-// --- App state ---
-let state = {
-  mode: null,
-  conj: {
-    item: null,
-    stage: 'verb', // 'verb' | 'classify'
-    classificationsAnswered: {},
-    score: 0,
-    total: 0,
-  },
-  bv: {
-    item: null,
-    score: 0,
-    total: 0,
-  },
-  recursos: {
-    submode: 'teoria', // teoria|practica
-    item: null,
-    score: 0,
-    total: 0
+async function loadAllData() {
+  try {
+    setPill("Cargando…");
+    const [c, b, r] = await Promise.all([
+      loadJson(PATHS.conjugaciones),
+      loadJson(PATHS.bv),
+      loadJson(PATHS.recursos),
+    ]);
+
+    // Aceptamos tanto {items:[...]} como [...]
+    DATA.conjugaciones = Array.isArray(c) ? c : (c.items || []);
+    DATA.bv = Array.isArray(b) ? b : (b.items || []);
+    DATA.recursos = Array.isArray(r) ? r : (r.items || []);
+
+    if (!DATA.conjugaciones.length) console.warn("conjugaciones.json vacío");
+    if (!DATA.bv.length) console.warn("bv.json vacío");
+    if (!DATA.recursos.length) console.warn("recursos.json vacío");
+
+    setPill("Listo");
+  } catch (e) {
+    console.error(e);
+    setPill("Error");
+    showFeedback(
+      "Error cargando datos. Revisa que existan data/conjugaciones.json, data/bv.json y data/recursos.json.",
+      "bad"
+    );
   }
+}
+
+/* ====== CONJUGACIONES ====== */
+let conjCurrent = null;
+let conjAnsweredCorrect = false;
+let conjSelections = {}; // field -> chosen
+
+const CONJ_OPTIONS = {
+  persona: ["primera", "segunda", "tercera"],
+  numero: ["singular", "plural"],
+  modo: ["indicativo", "subjuntivo", "imperativo"],
+  tiempo: [
+    "presente",
+    "pretérito imperfecto",
+    "pretérito perfecto simple",
+    "pretérito perfecto compuesto",
+    "pluscuamperfecto",
+    "futuro",
+    "condicional",
+    "presente de subjuntivo",
+    "pretérito imperfecto de subjuntivo",
+    "pretérito perfecto de subjuntivo",
+    "pluscuamperfecto de subjuntivo",
+    "imperativo",
+  ],
+  conjugacion: ["-ar", "-er", "-ir"],
+  aspecto: ["simple", "compuesto"],
+  voz: ["activa", "pasiva"],
+  regularidad: ["regular", "irregular"],
 };
 
-// --- Navigation ---
-function goHome(){
-  state.mode = null;
-  setView('#home');
-  $('#modeTitle').textContent = '';
-  clearFeedback();
+function getField(obj, ...keys) {
+  for (const k of keys) {
+    if (obj && obj[k] != null && obj[k] !== "") return obj[k];
+  }
+  return "";
 }
 
-function setHeader(title){
-  $('#modeTitle').textContent = title;
-}
+function renderConj() {
+  setModeTitle("Conjugaciones verbales");
+  setPill("Listo");
 
-function renderAppReady(){
-  // Start at home
-  setView('#home');
-  setHeader('');
-  clearFeedback();
-}
-
-// --- Conjugaciones ---
-const CONJ_FIELDS = [
-  { key: 'Persona', label: 'Persona', options: ['primera','segunda','tercera'] },
-  { key: 'Número', label: 'Número', options: ['singular','plural'] },
-  { key: 'Tiempo', label: 'Tiempo', options: [] },
-  { key: 'Modo', label: 'Modo', options: ['indicativo','subjuntivo','imperativo'] },
-  { key: 'Conjugación', label: 'Conjugación', options: ['-ar','-er','-ir'] },
-  { key: 'Aspecto', label: 'Aspecto', options: ['simple','compuesto'] },
-  { key: 'Voz', label: 'Voz', options: ['activa','pasiva'] },
-  { key: 'Regular/Irregular', label: 'Regular/irregular', options: ['regular','irregular'] }
-];
-
-function uniqueTimes(){
-  const s = new Set(DATA.conjugaciones.map(x=>String(x.Tiempo||'').toLowerCase()).filter(Boolean));
-  return Array.from(s).sort((a,b)=>a.localeCompare(b,'es'));
-}
-
-function startConjugaciones(){
-  state.mode = 'conj';
-  setHeader('Conjugaciones verbales');
-  setView('#conjugaciones');
-  $('#conjInput').value = '';
-  $('#conjInput').focus();
-  $('#conjClassify').innerHTML = '';
-  $('#conjClassify').style.display = 'none';
-  $('#conjVerbArea').style.display = 'block';
-  clearFeedback();
-
-  // Ensure Tiempo options are filled dynamically
-  const tiempos = uniqueTimes();
-  const tiempoField = CONJ_FIELDS.find(f=>f.key==='Tiempo');
-  tiempoField.options = tiempos.length ? tiempos : ['presente'];
-
-  nextConjItem();
-}
-
-function nextConjItem(){
-  state.conj.item = choice(DATA.conjugaciones);
-  state.conj.stage = 'verb';
-  state.conj.classificationsAnswered = {};
-  $('#conjSentence').textContent = state.conj.item.Frase || '';
-  $('#conjHint').textContent = 'Escribe el verbo tal como aparece en la frase.';
-  $('#conjInput').value = '';
-  $('#conjInput').focus();
-  $('#conjClassify').innerHTML = '';
-  $('#conjClassify').style.display = 'none';
-  $('#conjVerbArea').style.display = 'block';
-  clearFeedback();
-}
-
-function checkConjVerb(){
-  const item = state.conj.item;
-  const user = normalizeAnswer($('#conjInput').value);
-  const correctRaw = item.Forma_verbal || '';
-  const correct = normalizeAnswer(correctRaw);
-
-  state.conj.total += 1;
-
-  if (!user){
-    flash('Escribe algo antes de comprobar.', false);
+  if (!DATA.conjugaciones.length) {
+    showFeedback("No hay datos de conjugaciones cargados.", "bad");
     return;
   }
 
-  if (user === correct){
-    state.conj.score += 1;
-    flash('¡Correcto! Ahora clasifícalo con los botones.', true);
-    showConjClassify();
-  } else {
-    flash(`No. La forma correcta era: “${correctRaw}”.`, false);
-  }
+  conjCurrent = pickRandom(DATA.conjugaciones);
+  conjAnsweredCorrect = false;
+  conjSelections = {};
 
-  updateScore();
+  const sentence = getField(conjCurrent, "frase", "sentence", "texto");
+  const verb = getField(conjCurrent, "forma", "verbo", "respuesta", "form");
+
+  $("#conjSentence").textContent = sentence || "(Sin frase en el JSON)";
+  $("#conjInput").value = "";
+  $("#conjHint").textContent = "Escribe el verbo tal como aparece en la frase.";
+
+  // Ocultar/limpiar clasificación
+  const classify = $("#conjClassify");
+  classify.style.display = "none";
+  classify.innerHTML = "";
+
+  // Guardamos el verbo correcto (para comparar)
+  conjCurrent.__verbTarget = verb;
 }
 
-function showConjClassify(){
-  const item = state.conj.item;
-  state.conj.stage = 'classify';
-  $('#conjVerbArea').style.display = 'none';
-  const wrap = $('#conjClassify');
-  wrap.innerHTML = '';
-  wrap.style.display = 'block';
+function checkConjVerb() {
+  if (!conjCurrent) return;
 
-  for (const field of CONJ_FIELDS){
-    const section = document.createElement('div');
-    section.className = 'question';
+  const typed = $("#conjInput").value;
+  const target = conjCurrent.__verbTarget;
 
-    const label = document.createElement('div');
-    label.className = 'label';
-    label.textContent = field.label;
+  // Normalizamos: no distingue mayúsculas y no penaliza tildes
+  const ok = normalizeAnswer(typed) === normalizeAnswer(target);
 
-    const group = document.createElement('div');
-    group.className = 'choices';
+  score.total += 1;
+  if (ok) score.correct += 1;
+  updateScore();
 
-    const correctValue = String(item[field.key] || '').toLowerCase();
+  if (!ok) {
+    showFeedback(`❌ No. La respuesta era: "${target}"`, "bad");
+    conjAnsweredCorrect = false;
+    $("#conjHint").textContent = "Fíjate en la frase y copia el verbo exactamente.";
+    return;
+  }
 
-    field.options.forEach(opt=>{
-      const b = document.createElement('button');
-      b.className = 'chip';
-      b.type = 'button';
-      b.textContent = opt;
-      b.addEventListener('click', ()=>{
-        // only first attempt counts
-        if (state.conj.classificationsAnswered[field.key]) return;
-        state.conj.classificationsAnswered[field.key] = true;
+  showFeedback("✅ ¡Correcto! Ahora clasifícalo con los botones.", "ok");
+  conjAnsweredCorrect = true;
+  $("#conjHint").textContent = "Ahora elige persona, número, tiempo, modo, etc.";
 
-        const picked = String(opt).toLowerCase();
-        const ok = picked === correctValue;
-        b.classList.add(ok ? 'ok' : 'bad');
+  renderConjClassify();
+}
 
-        // lock all buttons in this group
-        group.querySelectorAll('button').forEach(x=>x.disabled = true);
+function renderConjClassify() {
+  const wrap = $("#conjClassify");
+  wrap.style.display = "block";
+  wrap.innerHTML = "";
 
-        if (!ok){
-          // highlight the correct one
-          group.querySelectorAll('button').forEach(x=>{
-            if (String(x.textContent).toLowerCase() === correctValue){
-              x.classList.add('ok');
-            }
-          });
+  const mapping = [
+    ["persona", "Persona"],
+    ["numero", "Número"],
+    ["tiempo", "Tiempo"],
+    ["modo", "Modo"],
+    ["conjugacion", "Conjugación"],
+    ["aspecto", "Aspecto"],
+    ["voz", "Voz"],
+    ["regularidad", "Regular/irregular"],
+  ];
+
+  // En el JSON puede venir como "pers", "num", etc.
+  const correctByField = {
+    persona: normalizeAnswer(getField(conjCurrent, "persona", "pers")),
+    numero: normalizeAnswer(getField(conjCurrent, "numero", "num")),
+    tiempo: normalizeAnswer(getField(conjCurrent, "tiempo")),
+    modo: normalizeAnswer(getField(conjCurrent, "modo")),
+    conjugacion: normalizeAnswer(getField(conjCurrent, "conjugacion", "conj")),
+    aspecto: normalizeAnswer(getField(conjCurrent, "aspecto", "asp")),
+    voz: normalizeAnswer(getField(conjCurrent, "voz")),
+    regularidad: normalizeAnswer(getField(conjCurrent, "regularidad", "reg")),
+  };
+
+  mapping.forEach(([field, label]) => {
+    const card = document.createElement("div");
+    card.className = "question";
+
+    const h = document.createElement("div");
+    h.className = "sentence";
+    h.style.fontSize = "14px";
+    h.style.opacity = "0.9";
+    h.textContent = label;
+    card.appendChild(h);
+
+    const row = document.createElement("div");
+    row.className = "choices";
+
+    // Opciones
+    const opts = CONJ_OPTIONS[field] || [];
+    opts.forEach((opt) => {
+      const btn = document.createElement("button");
+      btn.type = "button";
+      btn.className = "btn chip";
+      btn.textContent = opt;
+
+      btn.addEventListener("click", () => {
+        const chosen = normalizeAnswer(opt);
+        conjSelections[field] = chosen;
+
+        // Pintar estado
+        const correct = correctByField[field];
+        $$(".question").forEach(() => {}); // noop
+
+        // Reset visual de botones de esta fila
+        Array.from(row.querySelectorAll("button")).forEach((b) => {
+          b.classList.remove("ok", "bad");
+        });
+
+        if (!correct) {
+          // Si el JSON no trae este campo, no penalizamos (evitamos “falsos suspensos”)
+          btn.classList.add("ok");
+          showFeedback(`✅ Guardado: ${label}. (Sin clave en datos para corregir)`, "ok");
+          return;
+        }
+
+        if (chosen === correct) {
+          btn.classList.add("ok");
+          showFeedback(`✅ ${label}: correcto.`, "ok");
+        } else {
+          btn.classList.add("bad");
+          showFeedback(`❌ ${label}: no. Correcto: "${correct}".`, "bad");
         }
       });
-      group.appendChild(b);
+
+      row.appendChild(btn);
     });
 
-    section.appendChild(label);
-    section.appendChild(group);
-    wrap.appendChild(section);
+    card.appendChild(row);
+    wrap.appendChild(card);
+  });
+}
+
+/* ====== B/V ====== */
+let bvCurrent = null;
+
+function renderBV() {
+  setModeTitle("Ortografía: b / v");
+  setPill("Listo");
+
+  if (!DATA.bv.length) {
+    showFeedback("No hay datos b/v cargados.", "bad");
+    return;
   }
+
+  bvCurrent = pickRandom(DATA.bv);
+
+  // Aceptamos distintos nombres de campo
+  const hueco =
+    getField(bvCurrent, "Con_hueco", "con_hueco", "hueco", "blank") ||
+    "";
+  const palabra =
+    getField(bvCurrent, "Palabra_correcta", "palabra_correcta", "palabra", "correcta") ||
+    "";
+  const letra = getField(bvCurrent, "Letra", "letra", "answer") || "";
+
+  bvCurrent.__hueco = hueco;
+  bvCurrent.__palabra = palabra;
+  bvCurrent.__letra = normalizeAnswer(letra);
+
+  $("#bvWord").textContent = hueco || "(Sin palabra en el JSON)";
+  $("#bvReveal").textContent = "";
 }
 
-// --- b/v ---
-function startBV(){
-  state.mode = 'bv';
-  setHeader('Ortografía: b / v');
-  setView('#bv');
-  clearFeedback();
-  nextBVItem();
-}
+function answerBV(letter) {
+  if (!bvCurrent) return;
 
-function nextBVItem(){
-  state.bv.item = choice(DATA.bv);
-  $('#bvWord').textContent = state.bv.item.Con_hueco;
-  $('#bvReveal').textContent = '';
-  $('#bvButtons').querySelectorAll('button').forEach(b=>b.disabled=false);
-}
+  score.total += 1;
 
-function answerBV(letter){
-  const item = state.bv.item;
-  state.bv.total += 1;
-  const ok = letter === item.Letra;
-  if (ok){ state.bv.score += 1; flash('¡Bien!', true); }
-  else { flash('No. Revisa la palabra.', false); }
-  $('#bvReveal').textContent = `Correcta: ${item.Palabra_correcta}`;
-  $('#bvButtons').querySelectorAll('button').forEach(b=>b.disabled=true);
+  const ok = normalizeAnswer(letter) === bvCurrent.__letra;
+  if (ok) score.correct += 1;
   updateScore();
+
+  if (ok) {
+    showFeedback("✅ ¡Correcto!", "ok");
+  } else {
+    showFeedback(`❌ No. Era "${bvCurrent.__palabra}"`, "bad");
+  }
+
+  $("#bvReveal").textContent = `Solución: ${bvCurrent.__palabra}`;
 }
 
-// --- Recursos ---
-const RESOURCE_TYPES = ['metáfora','símil','personificación','hipérbole'];
+/* ====== RECURSOS ====== */
+let recMode = "teoría"; // "teoría" | "práctica"
+let recCurrent = null;
 
-function startRecursos(){
-  state.mode = 'recursos';
-  setHeader('Recursos literarios');
-  setView('#recursos');
-  clearFeedback();
-  state.recursos.submode = 'teoria';
-  $('#recMode').textContent = 'Teoría';
-  nextRecursoItem();
+function setRecMode(mode) {
+  recMode = mode;
+  $("#recMode").textContent = mode === "teoría" ? "Teoría" : "Práctica";
+  renderRec();
 }
 
-function setRecSubmode(m){
-  state.recursos.submode = m;
-  $('#recMode').textContent = (m === 'teoria') ? 'Teoría' : 'Práctica';
-  nextRecursoItem();
-}
+function renderRec() {
+  setModeTitle("Recursos literarios");
+  setPill("Listo");
 
-function nextRecursoItem(){
-  clearFeedback();
-  const m = state.recursos.submode;
-  const pool = DATA.recursos.filter(x=>String(x.Modo||'').toLowerCase() === (m==='teoria'?'teoría':'práctica'));
-  state.recursos.item = choice(pool);
-  $('#recPrompt').textContent = state.recursos.item.Enunciado;
-  $('#recButtons').querySelectorAll('button').forEach(b=>b.disabled=false);
-}
+  if (!DATA.recursos.length) {
+    showFeedback("No hay datos de recursos literarios cargados.", "bad");
+    return;
+  }
 
-function answerRecurso(tipo){
-  const item = state.recursos.item;
-  state.recursos.total += 1;
-  const ok = normalizeAnswer(tipo) === normalizeAnswer(item.Respuesta);
-  if (ok){ state.recursos.score += 1; flash('¡Correcto!', true); }
-  else { flash(`No. Era: ${item.Respuesta}.`, false); }
-  $('#recButtons').querySelectorAll('button').forEach(b=>b.disabled=true);
-  updateScore();
-}
-
-// --- Scoreboard ---
-// --- Persistence (local) ---
-const LS_KEY = 'lengua_pablo_score_v1';
-
-function saveScore(){
-  try{
-    localStorage.setItem(LS_KEY, JSON.stringify({
-      conj:{score: state.conj.score, total: state.conj.total},
-      bv:{score: state.bv.score, total: state.bv.total},
-      recursos:{score: state.recursos.score, total: state.recursos.total}
-    }));
-  }catch(e){ /* ignore */ }
-}
-
-function loadScore(){
-  try{
-    const raw = localStorage.getItem(LS_KEY);
-    if(!raw) return;
-    const s = JSON.parse(raw);
-    if(s?.conj){ state.conj.score = s.conj.score||0; state.conj.total = s.conj.total||0; }
-    if(s?.bv){ state.bv.score = s.bv.score||0; state.bv.total = s.bv.total||0; }
-    if(s?.recursos){ state.recursos.score = s.recursos.score||0; state.recursos.total = s.recursos.total||0; }
-  }catch(e){ /* ignore */ }
-}
-
-function updateScore(){
-  const total = state.conj.total + state.bv.total + state.recursos.total;
-  const score = state.conj.score + state.bv.score + state.recursos.score;
-  $('#score').textContent = `Aciertos: ${score} / ${total}`;
-  saveScore();
-}
-
-
-function resetScore(){
-  state.conj.score=0; state.conj.total=0;
-  state.bv.score=0; state.bv.total=0;
-  state.recursos.score=0; state.recursos.total=0;
-  saveScore();
-  updateScore();
-  flash('Marcador reiniciado.', true);
-}
-
-// --- Init ---
-async function init(){
-  renderAppReady();
-
-  // wire buttons
-  $('#homeConj').addEventListener('click', startConjugaciones);
-  $('#homeBV').addEventListener('click', startBV);
-  $('#homeRec').addEventListener('click', startRecursos);
-  $all('[data-home]').forEach(b=>b.addEventListener('click', goHome));
-
-  $('#btn-home').addEventListener('click', goHome);
-  $('#btn-reset').addEventListener('click', resetScore);
-
-  $('#conjCheck').addEventListener('click', checkConjVerb);
-  $('#conjNext').addEventListener('click', nextConjItem);
-  $('#conjInput').addEventListener('keydown', (e)=>{
-    if (e.key === 'Enter') checkConjVerb();
+  const filtered = DATA.recursos.filter((x) => {
+    const m = normalizeAnswer(getField(x, "Modo", "modo", "mode"));
+    return m === normalizeAnswer(recMode);
   });
 
-  $('#bvB').addEventListener('click', ()=>answerBV('b'));
-  $('#bvV').addEventListener('click', ()=>answerBV('v'));
-  $('#bvNext').addEventListener('click', nextBVItem);
+  recCurrent = pickRandom(filtered.length ? filtered : DATA.recursos);
 
-  $('#recTheory').addEventListener('click', ()=>setRecSubmode('teoria'));
-  $('#recPractice').addEventListener('click', ()=>setRecSubmode('practica'));
-  $all('[data-recurso]').forEach(b=>{
-    b.addEventListener('click', ()=>answerRecurso(b.getAttribute('data-recurso')));
-  });
-  $('#recNext').addEventListener('click', nextRecursoItem);
+  const prompt = getField(recCurrent, "Enunciado", "enunciado", "texto", "prompt") || "";
+  const answer = getField(recCurrent, "Respuesta", "respuesta", "tipo", "Tipo") || "";
 
-  // load data
-  await loadData();
-  loadScore();
-  updateScore();
+  recCurrent.__answer = normalizeAnswer(answer);
 
-  // register SW
-  if ('serviceWorker' in navigator){
-    try{
-      await navigator.serviceWorker.register('sw.js');
-    }catch(e){
-      // ignore
-    }
-  }
+  $("#recPrompt").textContent = prompt || "(Sin enunciado en el JSON)";
 }
 
-init();
+function answerRec(chosen) {
+  if (!recCurrent) return;
+
+  score.total += 1;
+
+  const ok = normalizeAnswer(chosen) === recCurrent.__answer;
+  if (ok) score.correct += 1;
+  updateScore();
+
+  if (ok) showFeedback("✅ ¡Correcto!", "ok");
+  else showFeedback(`❌ No. Era: "${recCurrent.__answer}"`, "bad");
+}
+
+/* ====== WIRING ====== */
+function wireUI() {
+  // Home buttons
+  $("#homeConj").addEventListener("click", () => {
+    setView("conjugaciones");
+    renderConj();
+  });
+  $("#homeBV").addEventListener("click", () => {
+    setView("bv");
+    renderBV();
+  });
+  $("#homeRec").addEventListener("click", () => {
+    setView("recursos");
+    setRecMode("teoría");
+  });
+
+  // Footer
+  $("#btn-home").addEventListener("click", () => setView("home"));
+  $("#btn-reset").addEventListener("click", () => resetScore());
+
+  // Conjugaciones
+  $("#conjCheck").addEventListener("click", checkConjVerb);
+  $("#conjNext").addEventListener("click", () => renderConj());
+  $("#conjInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") checkConjVerb();
+  });
+
+  // BV
+  $("#bvB").addEventListener("click", () => answerBV("b"));
+  $("#bvV").addEventListener("click", () => answerBV("v"));
+  $("#bvNext").addEventListener("click", () => renderBV());
+
+  // Recursos
+  $("#recTheory").addEventListener("click", () => setRecMode("teoría"));
+  $("#recPractice").addEventListener("click", () => setRecMode("práctica"));
+  $("#recNext").addEventListener("click", () => renderRec());
+
+  // Botones de respuesta (delegación)
+  $("#recButtons").addEventListener("click", (e) => {
+    const btn = e.target.closest("button[data-recurso]");
+    if (!btn) return;
+    answerRec(btn.dataset.recurso);
+  });
+
+  updateScore();
+}
+
+/* ====== INIT ====== */
+window.addEventListener("DOMContentLoaded", async () => {
+  wireUI();
+  await loadAllData();
+
+  // Pantalla inicial
+  setView("home");
+  setModeTitle("");
+  setPill("Listo");
+
+  // Registrar SW (si existe)
+  if ("serviceWorker" in navigator) {
+    navigator.serviceWorker.register("sw.js").catch(() => {});
+  }
+});
