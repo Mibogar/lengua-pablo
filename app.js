@@ -1,12 +1,14 @@
 /* ==============================
    Lengua — Pablo (app.js)
-   Compatible con el index.html actual
-   - Vistas: #home, #conjugaciones, #bv, #recursos
-   - Botones: #homeConj, #homeBV, #homeRec
+   - Vistas: #home, #conjugaciones, #bv, #recursos  (clase .view / .active)
+   - Botones home: #homeConj, #homeBV, #homeRec
    - Footer: #btn-home, #btn-reset, #score
-   - Conjugaciones: #conjSentence, #conjInput, #conjCheck, #conjNext, #conjHint, #conjClassify
-   - BV: #bvWord, #bvReveal, #bvB, #bvV, #bvNext
-   - Recursos: #recMode, #recTheory, #recPractice, #recPrompt, #recButtons, #recNext
+   - Conjugaciones:
+        #conjSentence, #conjInput, #conjCheck, #conjNext, #conjHint, #conjClassify
+   - BV:
+        #bvWord, #bvReveal, #bvB, #bvV, #bvNext
+   - Recursos:
+        #recMode, #recTheory, #recPractice, #recPrompt, #recButtons, #recNext
 ================================ */
 
 const PATHS = {
@@ -105,10 +107,6 @@ async function loadAllData() {
     DATA.recursos = Array.isArray(r) ? r : (r.items || []);
 
     setPill("Listo");
-
-    if (!DATA.conjugaciones.length) console.warn("conjugaciones.json vacío");
-    if (!DATA.bv.length) console.warn("bv.json vacío");
-    if (!DATA.recursos.length) console.warn("recursos.json vacío");
   } catch (e) {
     console.error(e);
     setPill("Error");
@@ -123,14 +121,13 @@ async function loadAllData() {
    CONJUGACIONES
    ====================== */
 let conjCurrent = null;
+let conjVerbOK = false;
+let conjClass = null; // estado de clasificación
 
 function getConjSentence(item) {
   return String(getField(item, "frase", "sentence", "texto") || "").trim();
 }
-
-/* Clave: solución del verbo/grupo verbal */
 function getConjSolution(item) {
-  // Lo intentamos en orden “más probable”
   const raw = getField(
     item,
     "solucion",
@@ -140,13 +137,12 @@ function getConjSolution(item) {
     "forma",
     "Forma",
     "respuesta",
-    "Respuesta",
-    "form"
+    "Respuesta"
   );
   return String(raw || "").trim();
 }
 
-function pickConjWithSolution(maxTries = 30) {
+function pickConjWithSolution(maxTries = 50) {
   if (!DATA.conjugaciones.length) return null;
 
   for (let i = 0; i < maxTries; i++) {
@@ -155,11 +151,220 @@ function pickConjWithSolution(maxTries = 30) {
     const sol = getConjSolution(cand);
     if (sent && sol) return cand;
   }
-
-  // Si después de varios intentos no encontramos, devolvemos cualquiera (pero avisaremos)
   return pickRandom(DATA.conjugaciones);
 }
 
+/* --- Catálogos de opciones --- */
+const CONJ_OPTIONS = {
+  persona: ["primera", "segunda", "tercera"],
+  numero: ["singular", "plural"],
+  // Tiempos típicos (ajústalo si quieres: el JSON manda)
+  tiempo: [
+    "presente",
+    "pretérito perfecto simple",
+    "pretérito imperfecto",
+    "pretérito perfecto compuesto",
+    "pretérito pluscuamperfecto",
+    "futuro simple",
+    "futuro compuesto",
+    "condicional simple",
+    "condicional compuesto",
+  ],
+  modo: ["indicativo", "subjuntivo", "imperativo"],
+  conjugacion: ["1ª", "2ª", "3ª"],
+  aspecto: ["simple", "compuesto", "perifrástico"],
+  voz: ["activa", "pasiva", "pasiva refleja"],
+  regularidad: ["regular", "irregular"],
+};
+
+function normCellValue(v) {
+  return normalizeAnswer(String(v || ""));
+}
+
+/* --- Render clasificación (después de acertar el verbo) --- */
+function buildChoiceGroup(key, title, expectedRaw) {
+  const expected = normCellValue(expectedRaw);
+
+  // Si el valor del JSON no está en el catálogo, lo añadimos para que se pueda elegir
+  let options = (CONJ_OPTIONS[key] || []).slice();
+  const expectedPretty = String(expectedRaw || "").trim();
+  const expectedNorm = normCellValue(expectedPretty);
+
+  if (expectedPretty && !options.some((o) => normCellValue(o) === expectedNorm)) {
+    options.unshift(expectedPretty); // lo ponemos primero
+  }
+
+  const wrap = document.createElement("div");
+  wrap.className = "question";
+
+  const h = document.createElement("div");
+  h.style.display = "flex";
+  h.style.justifyContent = "space-between";
+  h.style.alignItems = "center";
+  h.style.gap = "10px";
+
+  const label = document.createElement("div");
+  label.style.fontWeight = "700";
+  label.textContent = title;
+
+  const status = document.createElement("div");
+  status.id = `st-${key}`;
+  status.style.fontSize = "13px";
+  status.style.opacity = "0.9";
+  status.textContent = "⏳ pendiente";
+
+  h.appendChild(label);
+  h.appendChild(status);
+
+  const choices = document.createElement("div");
+  choices.className = "choices";
+
+  options.forEach((opt) => {
+    const btn = document.createElement("button");
+    btn.type = "button";
+    btn.className = "chip";
+    btn.textContent = opt;
+    btn.dataset.key = key;
+    btn.dataset.value = opt;
+    choices.appendChild(btn);
+  });
+
+  wrap.appendChild(h);
+  wrap.appendChild(choices);
+
+  return { wrap, expectedNorm: expected, expectedRaw: expectedPretty };
+}
+
+function startConjClassification() {
+  const box = $("#conjClassify");
+  if (!box) return;
+
+  // Estado
+  conjClass = {
+    answered: {}, // key -> boolean correcto
+    expected: {}, // key -> expectedNorm
+    expectedRaw: {}, // key -> expectedRaw
+  };
+
+  // Campos desde JSON
+  const expected = {
+    persona: getField(conjCurrent, "persona", "Pers.", "pers"),
+    numero: getField(conjCurrent, "numero", "Núm.", "num"),
+    tiempo: getField(conjCurrent, "tiempo", "Tiempo"),
+    modo: getField(conjCurrent, "modo", "Modo"),
+    conjugacion: getField(conjCurrent, "conjugacion", "Conj.", "conj"),
+    aspecto: getField(conjCurrent, "aspecto", "Asp.", "asp"),
+    voz: getField(conjCurrent, "voz", "Voz"),
+    regularidad: getField(conjCurrent, "regularidad", "Reg.", "reg"),
+  };
+
+  box.style.display = "block";
+  box.innerHTML = "";
+
+  const title = document.createElement("div");
+  title.style.fontWeight = "800";
+  title.style.marginTop = "14px";
+  title.style.marginBottom = "8px";
+  title.textContent = "Clasifica el verbo:";
+  box.appendChild(title);
+
+  const grid = document.createElement("div");
+  grid.style.display = "grid";
+  grid.style.gridTemplateColumns = "repeat(auto-fit, minmax(240px, 1fr))";
+  grid.style.gap = "12px";
+
+  const defs = [
+    ["persona", "1) Persona", expected.persona],
+    ["numero", "2) Número", expected.numero],
+    ["tiempo", "3) Tiempo", expected.tiempo],
+    ["modo", "4) Modo", expected.modo],
+    ["conjugacion", "5) Conjugación", expected.conjugacion],
+    ["aspecto", "6) Aspecto", expected.aspecto],
+    ["voz", "7) Voz", expected.voz],
+    ["regularidad", "8) Regular/Irregular", expected.regularidad],
+  ];
+
+  defs.forEach(([key, label, expRaw]) => {
+    const g = buildChoiceGroup(key, label, expRaw);
+    conjClass.expected[key] = g.expectedNorm;
+    conjClass.expectedRaw[key] = g.expectedRaw;
+    grid.appendChild(g.wrap);
+  });
+
+  box.appendChild(grid);
+
+  const summary = document.createElement("div");
+  summary.id = "conjSummary";
+  summary.style.marginTop = "12px";
+  summary.style.opacity = "0.9";
+  summary.textContent = "Completa las 8 clasificaciones.";
+  box.appendChild(summary);
+
+  // Delegación clicks
+  box.onclick = (e) => {
+    const btn = e.target.closest("button.chip");
+    if (!btn) return;
+
+    const key = btn.dataset.key;
+    const valueRaw = btn.dataset.value;
+    const value = normCellValue(valueRaw);
+    const expectedNorm = conjClass.expected[key];
+
+    // desmarcar selección previa del grupo
+    btn.parentElement.querySelectorAll("button.chip").forEach((b) => {
+      b.style.outline = "none";
+      b.style.opacity = "0.9";
+    });
+
+    // marcar seleccionado
+    btn.style.outline = "2px solid rgba(91,140,255,.55)";
+    btn.style.opacity = "1";
+
+    const ok = value === expectedNorm;
+    conjClass.answered[key] = ok;
+
+    const st = document.getElementById(`st-${key}`);
+    if (st) {
+      st.textContent = ok ? "✅ correcto" : `❌ era: ${conjClass.expectedRaw[key] || "(vacío)"}`;
+      st.style.color = ok ? "var(--good)" : "var(--bad)";
+      st.style.fontWeight = "700";
+    }
+
+    updateConjSummary();
+  };
+
+  updateConjSummary();
+}
+
+function updateConjSummary() {
+  const sum = $("#conjSummary");
+  if (!sum || !conjClass) return;
+
+  const keys = [
+    "persona",
+    "numero",
+    "tiempo",
+    "modo",
+    "conjugacion",
+    "aspecto",
+    "voz",
+    "regularidad",
+  ];
+
+  const answeredCount = keys.filter((k) => k in conjClass.answered).length;
+  const correctCount = keys.filter((k) => conjClass.answered[k] === true).length;
+
+  if (answeredCount < keys.length) {
+    sum.textContent = `Progreso: ${answeredCount}/8 · Correctas: ${correctCount}`;
+    return;
+  }
+
+  // completado
+  sum.textContent = `✅ Clasificación completada. Correctas: ${correctCount}/8`;
+  showFeedback(`✅ Clasificación completada: ${correctCount}/8`, "ok");
+}
+
+/* --- Render / Check conjugaciones --- */
 function renderConj() {
   setModeTitle("Conjugaciones verbales");
   if (!DATA.conjugaciones.length) {
@@ -168,6 +373,9 @@ function renderConj() {
   }
 
   conjCurrent = pickConjWithSolution();
+  conjVerbOK = false;
+  conjClass = null;
+
   const sentence = getConjSentence(conjCurrent);
   const solution = getConjSolution(conjCurrent);
 
@@ -175,19 +383,15 @@ function renderConj() {
   $("#conjInput").value = "";
   $("#conjHint").textContent = "Escribe el verbo (o grupo verbal) tal como aparece en la frase.";
 
-  // Ocultar/limpiar la zona de clasificación (para el siguiente paso del proyecto)
   const classify = $("#conjClassify");
   if (classify) {
     classify.style.display = "none";
     classify.innerHTML = "";
+    classify.onclick = null;
   }
 
-  // Si no hay solución, avisamos (sin penalizar) y sugerimos pasar a otra
   if (!solution) {
-    showFeedback(
-      "⚠️ Esta frase no tiene solución guardada en los datos. Pulsa “Siguiente”.",
-      "bad"
-    );
+    showFeedback("⚠️ Esta frase no tiene solución guardada. Pulsa “Siguiente”.", "bad");
   }
 }
 
@@ -198,7 +402,6 @@ function checkConjVerb() {
   const solutionRaw = getConjSolution(conjCurrent);
   const solution = normalizeAnswer(solutionRaw);
 
-  // Si no hay solución, no evaluamos (evita el bug del "")
   if (!solution) {
     showFeedback(
       "⚠️ Esta frase no tiene solución en los datos (no se puede corregir). Pulsa “Siguiente”.",
@@ -213,6 +416,10 @@ function checkConjVerb() {
     score.correct += 1;
     updateScore();
     showFeedback("✅ ¡Correcto!", "ok");
+    conjVerbOK = true;
+
+    // Aquí empieza la “conjugación” (clasificación)
+    startConjClassification();
   } else {
     updateScore();
     showFeedback(`❌ No. La respuesta era: "${solutionRaw}"`, "bad");
@@ -240,7 +447,6 @@ function renderBV() {
     "";
   const letra = getField(bvCurrent, "Letra", "letra", "answer") || "";
 
-  bvCurrent.__hueco = hueco;
   bvCurrent.__palabra = palabra;
   bvCurrent.__letra = normalizeAnswer(letra);
 
@@ -252,7 +458,6 @@ function answerBV(letter) {
   if (!bvCurrent) return;
 
   score.total += 1;
-
   const ok = normalizeAnswer(letter) === bvCurrent.__letra;
   if (ok) score.correct += 1;
   updateScore();
@@ -351,7 +556,7 @@ function wireUI() {
   $("#recPractice").addEventListener("click", () => setRecMode("práctica"));
   $("#recNext").addEventListener("click", renderRec);
 
-  // Botones de respuesta (delegación)
+  // Botones de respuesta recursos (delegación)
   $("#recButtons").addEventListener("click", (e) => {
     const btn = e.target.closest("button[data-recurso]");
     if (!btn) return;
@@ -369,9 +574,8 @@ window.addEventListener("DOMContentLoaded", async () => {
   setModeTitle("");
   setPill("Listo");
 
-  // Registrar SW si existe (no es imprescindible para que funcione)
+  // Registrar SW (no imprescindible para que funcione)
   if ("serviceWorker" in navigator) {
     navigator.serviceWorker.register("sw.js").catch(() => {});
   }
 });
-
