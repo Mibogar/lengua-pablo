@@ -1,91 +1,134 @@
-<!doctype html>
+<!DOCTYPE html>
 <html lang="es">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Lengua — Pablo</title>
-  <meta name="theme-color" content="#0b0f14" />
-
-  <link rel="manifest" href="./manifest.json" />
-  <link rel="stylesheet" href="./styles.css" />
+  <link rel="stylesheet" href="styles.css?v=20260116-1">
 </head>
 
 <body>
   <div class="app">
-    <!-- Cabecera -->
     <header class="header">
-      <div>
-        <h1>Lengua</h1>
-        <div class="sub" id="modeTitle"></div>
+      <div class="brand">
+        <!-- Si no tienes icono, puedes borrar el img -->
+        <img src="icon-192.png" alt="" onerror="this.style.display='none'">
+        <div>
+          <h1>Lengua</h1>
+          <div class="badge">Elige qué estudiar</div>
+        </div>
       </div>
-      <button class="pill" id="btnDone" type="button">Listo</button>
+      <button id="btn-ready" class="small ghost">Listo</button>
     </header>
 
-    <!-- Feedback -->
     <div id="feedback" class="feedback hidden"></div>
 
-    <!-- Contenido -->
-    <main>
-      <!-- HOME -->
-      <section id="home" class="view active">
-        <div class="card">
-          <div class="sectionTitle">Elige qué estudiar</div>
+    <!-- HOME -->
+    <section id="home" class="view active">
+      <div class="card">
+        <div class="label">Elige qué estudiar</div>
+        <div class="grid">
+          <button id="homeConj" class="primary">Conjugaciones verbales</button>
+          <button id="homeBV">Ortografía: b / v</button>
+          <button id="homeRec">Recursos literarios</button>
+        </div>
+      </div>
+    </section>
 
-          <div class="choiceGrid" style="margin-top:14px;">
-            <button class="btn" id="goConjugaciones" type="button">Conjugaciones verbales</button>
-            <button class="btn" id="goBV" type="button">Ortografía: b / v</button>
-            <button class="btn" id="goRecursos" type="button">Recursos literarios</button>
+    <!-- CONJUGACIONES -->
+    <section id="conjugaciones" class="view">
+      <div class="card">
+        <div class="row">
+          <h2 style="margin:0">Conjugaciones</h2>
+          <div style="flex:1"></div>
+          <button id="conjModeRecon" class="small">Reconocer</button>
+          <button id="conjModeProd" class="small">Producir</button>
+        </div>
+
+        <div class="hr"></div>
+
+        <div id="conjSentence" class="sentence"></div>
+
+        <div id="conjReconUI">
+          <div class="label">Escribe el verbo (o grupo verbal) tal como aparece en la frase</div>
+          <div class="row">
+            <input id="conjInput" type="text" placeholder="Escribe aquí…" />
+            <button id="conjCheck" class="primary">Comprobar</button>
+          </div>
+          <div class="hint" id="conjHint"></div>
+          <div class="row space" style="margin-top:12px">
+            <div class="muted" id="conjScore"></div>
+            <button id="conjNext" class="small">Siguiente</button>
           </div>
         </div>
-      </section>
 
-      <!-- CONJUGACIONES -->
-      <section id="conjugaciones" class="view"></section>
+        <div id="conjProdUI" class="hidden">
+          <div class="label">Forma:</div>
+          <div id="prodForm" class="word"></div>
 
-      <!-- B/V -->
-      <section id="bv" class="view"></section>
+          <div class="label">Clasifica esta forma en 3 pasos</div>
 
-      <!-- RECURSOS -->
-      <section id="recursos" class="view"></section>
-    </main>
+          <div class="label">1) Modo</div>
+          <div id="prodStep1" class="choices"></div>
 
-    <!-- Pie -->
+          <div class="label">2) Tiempo (grupo)</div>
+          <div id="prodStep2" class="choices"></div>
+
+          <div class="label">3) Tipo exacto</div>
+          <div id="prodStep3" class="choices"></div>
+
+          <div class="row" style="margin-top:12px">
+            <button id="prodCheck" class="primary">Comprobar</button>
+            <button id="prodNext" class="small">Siguiente</button>
+          </div>
+          <div class="muted" id="prodScore" style="margin-top:10px"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- BV -->
+    <section id="bv" class="view">
+      <div class="card">
+        <h2 style="margin:0 0 8px">Uso de b / v</h2>
+        <div class="label">Completa la palabra:</div>
+        <div id="bvWord" class="word"></div>
+
+        <div class="row" style="margin-top:8px">
+          <button id="bvB" class="chip">b</button>
+          <button id="bvV" class="chip">v</button>
+          <button id="bvNext" class="small">Siguiente</button>
+        </div>
+
+        <div class="muted" id="bvScore" style="margin-top:10px"></div>
+      </div>
+    </section>
+
+    <!-- RECURSOS -->
+    <section id="recursos" class="view">
+      <div class="card">
+        <h2 style="margin:0 0 8px">Recursos literarios</h2>
+
+        <div id="recPrompt" class="sentence"></div>
+        <div id="recButtons" class="choices" style="margin-top:10px"></div>
+
+        <div class="row" style="margin-top:12px">
+          <button id="recNext" class="small">Siguiente</button>
+        </div>
+
+        <div class="muted" id="recScore" style="margin-top:10px"></div>
+      </div>
+    </section>
+
     <footer class="footer">
-      <a class="link" href="#" id="homeLink">Inicio</a>
+      <button id="btn-home" class="link">Inicio</button>
       <span class="sep">·</span>
-      <a class="link" href="#" id="resetLink">Reiniciar marcador</a>
+      <button id="btn-reset" class="link">Reiniciar marcador</button>
       <span class="sep">·</span>
-      <span id="score">Aciertos: 0 / 0</span>
+      <span id="score" class="muted">Aciertos: 0 / 0</span>
     </footer>
   </div>
 
-  <script>
-    // Registrar SW si existe (no revienta si no está)
-    if ('serviceWorker' in navigator) {
-      window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js').catch(() => {});
-      });
-    }
-
-    // Botón "Listo" (vuelve a inicio sin recargar)
-    window.addEventListener('DOMContentLoaded', () => {
-      const btn = document.getElementById('btnDone');
-      if (btn) {
-        btn.addEventListener('click', () => {
-          const home = document.getElementById('home');
-          const views = document.querySelectorAll('.view');
-          views.forEach(v => v.classList.remove('active'));
-          if (home) home.classList.add('active');
-          const mt = document.getElementById('modeTitle');
-          if (mt) mt.textContent = '';
-          const fb = document.getElementById('feedback');
-          if (fb) { fb.classList.add('hidden'); fb.innerHTML = ''; }
-        });
-      }
-    });
-  </script>
-
-  <!-- IMPORTANTÍSIMO: sube versión para romper caché -->
-  <script src="./app.js?v=212"></script>
+  <!-- OJO: el ?v=... fuerza a que NO se quede cacheado -->
+  <script src="app.js?v=20260116-7"></script>
 </body>
 </html>
