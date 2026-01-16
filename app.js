@@ -1,915 +1,639 @@
-(() => {
-  // -------------------------
-  // Utils
-  // -------------------------
-  const $ = (sel) => document.querySelector(sel);
+/* =============================
+   Lengua — Pablo (app.js)
+   - Vistas: #home, #conjugaciones, #bv, #recursos  (clase .view / .active)
+   - Botones home: #homeConj, #homeBV, #homeRec
+   - Footer: #btn-home, #btn-reset, #score
+   - Conjugaciones:
+       #conjSentence, #conjInput, #conjCheck, #conjNext,
+       #conjHint, #conjClassify
+   - BV:
+       #bvWord, #bvReveal, #bvB, #bvV, #bvNext
+   - Recursos:
+       #recMode, #recTheory, #recPractice, #recPrompt,
+       #recButtons, #recNext
+============================= */
 
-  function norm(s) {
-    return (s ?? "")
-      .toString()
-      .trim()
-      .toLowerCase()
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "");
+const APP_VERSION = "2026-01-16-2248"; // cambia esto si quieres forzar recarga
+
+const PATHS = {
+  conjugaciones: `data/conjugaciones.json?v=${APP_VERSION}`,
+  bv: `data/bv.json?v=${APP_VERSION}`,
+  recursos: `data/recursos.json?v=${APP_VERSION}`,
+};
+
+const $ = (s) => document.querySelector(s);
+const $$ = (s) => Array.from(document.querySelectorAll(s));
+
+/* ---------- Normalización (sin tildes / mayúsculas) ---------- */
+function stripDiacritics(s) {
+  return String(s ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
+}
+function normalizeAnswer(s) {
+  return stripDiacritics(s).trim().replace(/\s+/g, " ").toLowerCase();
+}
+function pickRandom(arr) {
+  return arr[Math.floor(Math.random() * arr.length)];
+}
+function getField(obj, ...keys) {
+  for (const k of keys) {
+    if (obj && obj[k] != null && String(obj[k]).trim() !== "") return obj[k];
   }
+  return "";
+}
 
-  function escapeHtml(s) {
-    return (s ?? "")
-      .toString()
-      .replaceAll("&", "&amp;")
-      .replaceAll("<", "&lt;")
-      .replaceAll(">", "&gt;")
-      .replaceAll('"', "&quot;")
-      .replaceAll("'", "&#039;");
-  }
+/* ---------- Fetch robusto (evita caché) ---------- */
+async function fetchJSON(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`HTTP ${res.status} al cargar ${url}`);
+  return await res.json();
+}
 
-  function pick(arr) {
-    return arr[Math.floor(Math.random() * arr.length)];
-  }
+/* ---------- Estado global ---------- */
+const state = {
+  view: "home",
+  score: { ok: 0, total: 0 },
 
-  function showFeedback(kind, msg) {
-    // kind: "ok" | "bad" | "info"
-    const fb = $("#feedback");
-    if (!fb) return;
-    fb.style.display = "block";
-    fb.className = `feedback ${kind}`;
-    fb.textContent = msg;
-  }
-
-  function hideFeedback() {
-    const fb = $("#feedback");
-    if (!fb) return;
-    fb.style.display = "none";
-  }
-
-  // -------------------------
-  // Data loading
-  // -------------------------
-  async function loadJson(path) {
-    const res = await fetch(path, { cache: "no-store" });
-    if (!res.ok) throw new Error(`${path} (${res.status})`);
-    return await res.json();
-  }
-
-  const DATA = {
-    conjugaciones: [],
+  data: {
+    conj: [],
     bv: [],
-    recursos: [],
-  };
-
-  // -------------------------
-  // App state
-  // -------------------------
-  const state = {
-    screen: "home", // home | conj_rec | conj_prod | bv | recursos
-    scoreOk: 0,
-    scoreTotal: 0,
-
-    // Conjugaciones
-    conjItem: null,
-
-    // Producir selections
-    prod: {
-      modo: null,   // Indicativo/Subjuntivo/Imperativo
-      grupo: null,  // Presente/Pretérito/Futuro/Condicional
-      exacto: null, // depende del grupo
-    },
-
-    // BV
-    bvItem: null,
-
-    // Recursos
-    recItem: null,
-  };
-
-  function setScreen(s) {
-    state.screen = s;
-    hideFeedback();
-    render();
-  }
-
-  function resetScore() {
-    state.scoreOk = 0;
-    state.scoreTotal = 0;
-    renderFooter();
-  }
-
-  // -------------------------
-  // Footer (links)
-  // -------------------------
-  function renderFooter() {
-    const scoreEl = $("#score");
-    if (scoreEl) scoreEl.textContent = `Aciertos: ${state.scoreOk} / ${state.scoreTotal}`;
-
-    const btnInicio = $("#btnInicio");
-    const btnReset = $("#btnReset");
-    btnInicio && (btnInicio.onclick = () => setScreen("home"));
-    btnReset && (btnReset.onclick = () => resetScore());
-  }
-
-  // -------------------------
-  // Classification mapping (Producir)
-  // -------------------------
-  function expectedFromItem(item) {
-    // Esperamos item.modo y item.tiempo (como en tu JSON)
-    const modoRaw = norm(item?.modo ?? "");
-    const tiempoRaw = norm(item?.tiempo ?? "");
-
-    // 1) Modo
-    let expModo = "Indicativo";
-    if (modoRaw.includes("subj")) expModo = "Subjuntivo";
-    else if (modoRaw.includes("imper")) expModo = "Imperativo";
-
-    // 2) Grupo y 3) Exacto
-    // Paso 2 SIEMPRE: Presente / Pretérito / Futuro / Condicional
-    // Paso 3 depende del 2 según tu regla.
-    let expGrupo = "Presente";
-    let expExacto = "Presente";
-
-    const isCond = tiempoRaw.includes("condicional");
-    const isFut = tiempoRaw.includes("futuro");
-    const isPres = tiempoRaw.includes("presente");
-
-    // Ojo: "pretérito perfecto simple/compuesto", imperfecto, pluscuamperfecto, anterior, etc.
-    const isPret =
-      tiempoRaw.includes("preterito") ||
-      tiempoRaw.includes("imperfecto") ||
-      tiempoRaw.includes("pluscuamperfecto") ||
-      tiempoRaw.includes("anterior") ||
-      (tiempoRaw.includes("perfecto") && !isPres);
-
-    if (isCond) {
-      expGrupo = "Condicional";
-      expExacto = tiempoRaw.includes("compuesto") ? "Condicional compuesto" : "Condicional simple";
-    } else if (isFut) {
-      expGrupo = "Futuro";
-      expExacto = tiempoRaw.includes("compuesto") ? "Futuro compuesto" : "Futuro simple";
-    } else if (isPret) {
-      expGrupo = "Pretérito";
-
-      if (tiempoRaw.includes("imperfecto")) expExacto = "Imperfecto";
-      else if (tiempoRaw.includes("pluscuamperfecto")) expExacto = "Pluscuamperfecto";
-      else if (tiempoRaw.includes("anterior")) expExacto = "Anterior";
-      else if (tiempoRaw.includes("perfecto compuesto")) expExacto = "Perfecto compuesto";
-      else if (tiempoRaw.includes("perfecto simple")) expExacto = "Perfecto simple";
-      else if (tiempoRaw.includes("perfecto") && tiempoRaw.includes("compuesto")) expExacto = "Perfecto compuesto";
-      else if (tiempoRaw.includes("perfecto") && tiempoRaw.includes("simple")) expExacto = "Perfecto simple";
-      else if (tiempoRaw.includes("perfecto")) expExacto = "Perfecto simple";
-      else expExacto = "Perfecto simple";
-    } else if (isPres) {
-      expGrupo = "Presente";
-      expExacto = "Presente";
-    } else {
-      expGrupo = "Presente";
-      expExacto = "Presente";
-    }
-
-    return { expModo, expGrupo, expExacto };
-  }
-
-  function exactOptionsForGroup(grupo) {
-    if (!grupo) return [];
-    if (grupo === "Presente") return ["Presente"];
-    if (grupo === "Pretérito") {
-      return ["Perfecto simple", "Perfecto compuesto", "Imperfecto", "Pluscuamperfecto", "Anterior"];
-    }
-    if (grupo === "Futuro") return ["Futuro simple", "Futuro compuesto"];
-    if (grupo === "Condicional") return ["Condicional simple", "Condicional compuesto"];
-    return [];
-  }
-
-  // -------------------------
-  // New items
-  // -------------------------
-  function newConjItem() {
-    if (!DATA.conjugaciones.length) return null;
-    return pick(DATA.conjugaciones);
-  }
-
-  function newBvItem() {
-    if (!DATA.bv.length) return null;
-    return pick(DATA.bv);
-  }
-
-  function newRecItem() {
-    if (!DATA.recursos.length) return null;
-    return pick(DATA.recursos);
-  }
-
-  // -------------------------
-  // UI helpers for buttons
-  // -------------------------
-  function buttonGroup(values, selectedValue, onSelect) {
-    return `
-      <div class="row">
-        ${values
-          .map((v) => {
-            const isOn = v === selectedValue;
-            return `<button type="button" class="small ${isOn ? "primary" : ""}" data-pick="${escapeHtml(v)}">${escapeHtml(v)}</button>`;
-          })
-          .join("")}
-      </div>
-    `;
-  }
-
-  function wireButtonGroup(rootEl, onSelect) {
-    rootEl.querySelectorAll("button[data-pick]").forEach((b) => {
-      b.addEventListener("click", () => onSelect(b.getAttribute("data-pick")));
-    });
-  }
-
-  // -------------------------
-  // Render
-  // -------------------------
-  function render() {
-    const main = $("main");
-    if (!main) return;
-
-    const header = `
-      <div class="header">
-        <h1>Lengua</h1>
-        <button type="button" class="small" id="btnListo">Listo</button>
-      </div>
-    `;
-
-    let body = "";
-
-    if (state.screen === "home") {
-      body = `
-        <div class="card">
-          <h2>Elige qué estudiar</h2>
-          <div class="row">
-            <button type="button" class="primary" id="goConj">Conjugaciones verbales</button>
-            <button type="button" id="goBV">Ortografía: b / v</button>
-            <button type="button" id="goRec">Recursos literarios</button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (state.screen === "conj_rec") {
-      if (!state.conjItem) state.conjItem = newConjItem();
-
-      const frase = state.conjItem?.frase ?? "(sin frase)";
-      body = `
-        <div class="card">
-          <div class="row">
-            <button type="button" class="small ${state.screen === "conj_rec" ? "primary" : ""}" id="tabRec">Reconocer</button>
-            <button type="button" class="small ${state.screen === "conj_prod" ? "primary" : ""}" id="tabProd">Producir</button>
-          </div>
-
-          <h2>Conjugaciones</h2>
-          <div style="font-size:18px;font-weight:700;margin:10px 0;">${escapeHtml(frase)}</div>
-
-          <div class="row">
-            <input id="recInput" placeholder="Escribe el verbo (o grupo verbal)..." />
-            <button type="button" class="primary" id="recCheck">Comprobar</button>
-          </div>
-
-          <div class="row" style="margin-top:10px;">
-            <button type="button" id="recNext">Siguiente</button>
-          </div>
-
-          <div class="muted" style="margin-top:10px;">Escribe el verbo tal como aparece en la frase.</div>
-        </div>
-      `;
-    }
-
-    if (state.screen === "conj_prod") {
-      if (!state.conjItem) state.conjItem = newConjItem();
-
-      // En Producir, la FORMA a clasificar debe ser la "solucion"
-      const forma = (state.conjItem?.solucion ?? "").toString().trim();
-      const formaShown = forma ? forma : "(sin forma en el JSON)";
-
-      const modos = ["Indicativo", "Subjuntivo", "Imperativo"];
-      const grupos = ["Presente", "Pretérito", "Futuro", "Condicional"];
-
-      // Paso 3 depende del 2
-      const exactos = exactOptionsForGroup(state.prod.grupo);
-      // Si elige Presente, exacto se fija a Presente
-      if (state.prod.grupo === "Presente") state.prod.exacto = "Presente";
-      // Si cambia grupo y el exacto no cuadra, lo vaciamos
-      if (state.prod.grupo && state.prod.exacto && !exactos.includes(state.prod.exacto)) {
-        state.prod.exacto = null;
-        if (state.prod.grupo === "Presente") state.prod.exacto = "Presente";
-      }
-
-      body = `
-        <div class="card">
-          <div class="row">
-            <button type="button" class="small ${state.screen === "conj_rec" ? "primary" : ""}" id="tabRec">Reconocer</button>
-            <button type="button" class="small ${state.screen === "conj_prod" ? "primary" : ""}" id="tabProd">Producir</button>
-          </div>
-
-          <h2>Conjugaciones</h2>
-          <div style="font-size:18px;font-weight:800;margin:10px 0;">
-            Forma: <span>${escapeHtml(formaShown)}</span>
-          </div>
-
-          <div class="muted">Clasifica esta forma en 3 pasos.</div>
-
-          <div style="margin-top:14px;">
-            <div class="label">1) Modo</div>
-            <div id="grpModo">
-              ${buttonGroup(modos, state.prod.modo, () => {})}
-            </div>
-          </div>
-
-          <div style="margin-top:14px;">
-            <div class="label">2) Tiempo</div>
-            <div id="grpGrupo">
-              ${buttonGroup(grupos, state.prod.grupo, () => {})}
-            </div>
-          </div>
-
-          <div style="margin-top:14px;">
-            <div class="label">3) Tipo exacto</div>
-            ${
-              !state.prod.grupo
-                ? `<div class="muted">Elige antes el paso 2.</div>`
-                : state.prod.grupo === "Presente"
-                ? `<div class="muted">En Presente lo dejamos como “Presente”.</div>`
-                : ""
-            }
-            <div id="grpExacto">
-              ${state.prod.grupo ? buttonGroup(exactos, state.prod.exacto, () => {}) : ""}
-            </div>
-          </div>
-
-          <div class="row" style="margin-top:14px;">
-            <button type="button" class="primary" id="prodCheck">Comprobar</button>
-            <button type="button" id="prodNext">Siguiente</button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (state.screen === "bv") {
-      if (!state.bvItem) state.bvItem = newBvItem();
-      const word = state.bvItem?.palabra ?? state.bvItem?.prompt ?? "(sin palabra)";
-      body = `
-        <div class="card">
-          <h2>Uso de b / v</h2>
-          <div style="font-size:18px;font-weight:700;margin:10px 0;">Completa la palabra:</div>
-          <div style="font-size:22px;font-weight:800;margin:10px 0;">${escapeHtml(word)}</div>
-          <div class="row">
-            <button type="button" class="primary" id="bvB">b</button>
-            <button type="button" class="primary" id="bvV">v</button>
-            <button type="button" id="bvNext">Siguiente</button>
-          </div>
-        </div>
-      `;
-    }
-
-    if (state.screen === "recursos") {
-      if (!state.recItem) state.recItem = newRecItem();
-      const title = state.recItem?.titulo ?? "Recursos literarios";
-      body = `
-        <div class="card">
-          <h2>${escapeHtml(title)}</h2>
-          <div class="muted">Aquí puedes seguir usando tu lógica actual (si ya te iba bien).</div>
-          <div class="row" style="margin-top:10px;">
-            <button type="button" id="recNext">Siguiente</button>
-          </div>
-        </div>
-      `;
-    }
-
-    main.innerHTML = header + body;
-    wire();
-    renderFooter();
-  }
-
-  // -------------------------
-  // Wire events per screen
-  // -------------------------
-  function wire() {
-    $("#btnListo") && ($("#btnListo").onclick = () => setScreen("home"));
-
-    // Home
-    $("#goConj") && ($("#goConj").onclick = () => {
-      state.conjItem = newConjItem();
-      state.prod = { modo: null, grupo: null, exacto: null };
-      setScreen("conj_rec");
-    });
-    $("#goBV") && ($("#goBV").onclick = () => {
-      state.bvItem = newBvItem();
-      setScreen("bv");
-    });
-    $("#goRec") && ($("#goRec").onclick = () => {
-      state.recItem = newRecItem();
-      setScreen("recursos");
-    });
-
-    // Tabs Conjugaciones
-    $("#tabRec") && ($("#tabRec").onclick = () => setScreen("conj_rec"));
-    $("#tabProd") && ($("#tabProd").onclick = () => {
-      // reinicio selección al entrar
-      state.prod = { modo: null, grupo: null, exacto: null };
-      setScreen("conj_prod");
-    });
-
-    // Reconocer
-    if (state.screen === "conj_rec") {
-      const input = $("#recInput");
-      $("#recCheck") && ($("#recCheck").onclick = () => {
-        if (!state.conjItem) return;
-
-        const correct = (state.conjItem.solucion ?? "").toString().trim();
-        const user = (input?.value ?? "").toString().trim();
-
-        const ok = norm(user) === norm(correct);
-        state.scoreTotal += 1;
-        if (ok) state.scoreOk += 1;
-
-        showFeedback(ok ? "ok" : "bad", ok ? "¡Correcto!" : `No. La respuesta era: "${correct}"`);
-        renderFooter();
-      });
-
-      $("#recNext") && ($("#recNext").onclick = () => {
-        state.conjItem = newConjItem();
-        if (input) input.value = "";
-        hideFeedback();
-        render();
-      });
-    }
-
-    // Producir
-    if (state.screen === "conj_prod") {
-      const grpModoWrap = $("#grpModo");
-      const grpGrupoWrap = $("#grpGrupo");
-      const grpExactoWrap = $("#grpExacto");
-
-      grpModoWrap && wireButtonGroup(grpModoWrap, (v) => {
-        state.prod.modo = v;
-        render();
-      });
-
-      grpGrupoWrap && wireButtonGroup(grpGrupoWrap, (v) => {
-        state.prod.grupo = v;
-        // al cambiar grupo, limpiamos exacto (salvo Presente)
-        state.prod.exacto = (v === "Presente") ? "Presente" : null;
-        render();
-      });
-
-      grpExactoWrap && wireButtonGroup(grpExactoWrap, (v) => {
-        state.prod.exacto = v;
-        render();
-      });
-
-      $("#prodCheck") && ($("#prodCheck").onclick = () => {
-        if (!state.conjItem) return;
-
-        if (!state.prod.modo || !state.prod.grupo) {
-          showFeedback("bad", "Te falta elegir el paso 1 (Modo) y el paso 2 (Tiempo).");
-          return;
-        }
-        if (state.prod.grupo !== "Presente" && !state.prod.exacto) {
-          showFeedback("bad", "Te falta elegir el paso 3 (Tipo exacto).");
-          return;
-        }
-
-        const { expModo, expGrupo, expExacto } = expectedFromItem(state.conjItem);
-        const selModo = state.prod.modo;
-        const selGrupo = state.prod.grupo;
-        const selExacto = (selGrupo === "Presente") ? "Presente" : state.prod.exacto;
-
-        const ok =
-          norm(selModo) === norm(expModo) &&
-          norm(selGrupo) === norm(expGrupo) &&
-          norm(selExacto) === norm(expExacto);
-
-        state.scoreTotal += 1;
-        if (ok) state.scoreOk += 1;
-
-        showFeedback(ok ? "ok" : "bad", ok ? "¡Correcto!" : `No. Era: ${expModo} / ${expGrupo} / ${expExacto}`);
-        renderFooter();
-      });
-
-      $("#prodNext") && ($("#prodNext").onclick = () => {
-        state.conjItem = newConjItem();
-        state.prod = { modo: null, grupo: null, exacto: null };
-        hideFeedback();
-        render();
-      });
-    }
-
-    // BV
-    if (state.screen === "bv") {
-      $("#bvB") && ($("#bvB").onclick = () => checkBV("b"));
-      $("#bvV") && ($("#bvV").onclick = () => checkBV("v"));
-      $("#bvNext") && ($("#bvNext").onclick = () => {
-        state.bvItem = newBvItem();
-        hideFeedback();
-        render();
-      });
-    }
-
-    // Recursos (placeholder)
-    if (state.screen === "recursos") {
-      $("#recNext") && ($("#recNext").onclick = () => {
-        state.recItem = newRecItem();
-        hideFeedback();
-        render();
-      });
-    }
-  }
-
-  function wireButtonGroup(rootEl, onSelect) {
-    rootEl.querySelectorAll("button[data-pick]").forEach((b) => {
-      b.addEventListener("click", () => onSelect(b.getAttribute("data-pick")));
-    });
-  }
-
-  function checkBV(letter) {
-    const it = state.bvItem;
-    if (!it) return;
-    const correct = (it.respuesta ?? it.solucion ?? "").toString().trim();
-    const ok = norm(letter) === norm(correct);
-
-    state.scoreTotal += 1;
-    if (ok) state.scoreOk += 1;
-
-    showFeedback(ok ? "ok" : "bad", ok ? "¡Correcto!" : `No. Era: ${correct}`);
-    renderFooter();
-  }
-
-  // -------------------------
-  // Boot
-  // -------------------------
-  async function boot() {
-    try {
-      // Cargamos lo que exista. Si alguno falla, avisamos pero seguimos.
-      try {
-        const c = await loadJson("./data/conjugaciones.json");
-        DATA.conjugaciones = Array.isArray(c) ? c : [];
-      } catch (e) {
-        console.warn(e);
-        showFeedback("info", "Aviso: no se pudo cargar data/conjugaciones.json");
-      }
-
-      try {
-        const b = await loadJson("./data/bv.json");
-        DATA.bv = Array.isArray(b) ? b : [];
-      } catch (e) {
-        console.warn(e);
-        // no molesto si ya te funciona b/v por otro lado
-      }
-
-      try {
-        const r = await loadJson("./data/recursos.json");
-        DATA.recursos = Array.isArray(r) ? r : [];
-      } catch (e) {
-        console.warn(e);
-      }
-
-      // Primera pantalla
-      render();
-    } catch (e) {
-      console.error(e);
-      showFeedback("bad", `Error: ${e.message}`);
-      render();
-    }
-  }
-
-  // Start
-  boot();
-})();
-/* =========================================================
-   PATCH BV + RECURSOS (pegar al final de app.js)
-   - Arregla: BV mostrando palabra completa
-   - Restaura: Recursos literarios (teoría + práctica)
-   - No toca Conjugaciones
-========================================================= */
-
-(function () {
-  // Helpers seguros (por si no existen en tu app.js actual)
-  const $ = (s) => document.querySelector(s);
-  const strip = (s) =>
-    String(s ?? "")
-      .normalize("NFD")
-      .replace(/[\u0300-\u036f]/g, "")
-      .toLowerCase();
-
-  function safeShowFeedback(msg, kind = "ok") {
-    // Si ya tienes showFeedback(), úsala; si no, intenta pintar en #feedback
-    if (typeof window.showFeedback === "function") {
-      window.showFeedback(msg, kind);
-      return;
-    }
-    const el = $("#feedback");
-    if (!el) return;
-    el.style.display = "block";
-    el.textContent = msg;
-    el.className = "feedback " + (kind === "error" ? "bad" : "ok");
-  }
-
-  function cloneToRemoveListeners(el) {
-    if (!el) return null;
-    const c = el.cloneNode(true);
-    el.replaceWith(c);
-    return c;
-  }
-
-  // =========================================================
-  // 1) BV (b / v)
-  // JSON esperado (flexible):
-  // - Puede ser array de strings ("tubo") o array de objetos.
-  // - Si es objeto, admite: { palabra, pos, correcta, incorrecta }
-  //   pos: índice donde va b/v (si no, se busca la primera b/v)
-  // =========================================================
-  const BV = {
-    data: [],
-    idx: 0,
-    current: null, // {word, pos, correctChar, masked}
-  };
-
-  function bvPickCurrent() {
-    if (!BV.data.length) return null;
-
-    const raw = BV.data[BV.idx % BV.data.length];
-    BV.idx = (BV.idx + 1) % BV.data.length;
-
-    let word = "";
-    let pos = -1;
-
-    if (typeof raw === "string") {
-      word = raw.trim();
-    } else {
-      word = String(raw.palabra ?? raw.word ?? raw.text ?? "").trim();
-      if (Number.isInteger(raw.pos)) pos = raw.pos;
-    }
-
-    if (!word) return null;
-
-    // Decide posición (si no viene)
-    if (pos < 0) {
-      const pB = word.toLowerCase().indexOf("b");
-      const pV = word.toLowerCase().indexOf("v");
-      if (pB === -1 && pV === -1) pos = -1;
-      else if (pB === -1) pos = pV;
-      else if (pV === -1) pos = pB;
-      else pos = Math.min(pB, pV);
-    }
-
-    if (pos < 0) {
-      // No hay b/v, lo dejamos como palabra normal pero avisamos
-      return {
-        word,
-        pos: -1,
-        correctChar: "",
-        masked: word,
-      };
-    }
-
-    const correctChar = word[pos].toLowerCase();
-    const masked =
-      word.slice(0, pos) + "_" + word.slice(pos + 1);
-
-    return { word, pos, correctChar, masked };
-  }
-
-  function bvRender() {
-    const wordEl = $("#bvWord");
-    const revealEl = $("#bvReveal");
-
-    if (!wordEl) return;
-
-    if (!BV.current) {
-      wordEl.textContent = "(no hay palabras en bv.json)";
-      if (revealEl) revealEl.textContent = "";
-      return;
-    }
-
-    // Mostrar con hueco (NUNCA la resuelta)
-    wordEl.textContent = BV.current.pos >= 0 ? BV.current.masked : BV.current.word;
-
-    // Oculta “reveal” por defecto (si existe)
-    if (revealEl) revealEl.textContent = "";
-  }
-
-  function bvCheck(choiceChar) {
-    if (!BV.current) return;
-
-    if (BV.current.pos < 0 || !BV.current.correctChar) {
-      safeShowFeedback("Esta palabra no tiene b/v para practicar.", "error");
-      return;
-    }
-
-    const ok = choiceChar === BV.current.correctChar;
-
-    if (ok) {
-      safeShowFeedback("¡Correcto!", "ok");
-      // Pintar ya la palabra completa
-      const wordEl = $("#bvWord");
-      if (wordEl) wordEl.textContent = BV.current.word;
-    } else {
-      safeShowFeedback(`No. Era "${BV.current.correctChar}".`, "error");
-      const revealEl = $("#bvReveal");
-      if (revealEl) revealEl.textContent = `Solución: ${BV.current.word}`;
-    }
-  }
-
-  async function bvLoad() {
-    // Usa PATHS.bv si existe; si no, usa ruta estándar
-    const path =
-      (window.PATHS && window.PATHS.bv) || "data/bv.json";
-
-    const res = await fetch(path, { cache: "no-store" });
-    if (!res.ok) throw new Error("No se pudo cargar " + path);
-    const json = await res.json();
-    BV.data = Array.isArray(json) ? json : (json.items || json.data || []);
-  }
-
-  async function initBV_PATCH() {
-    const view = $("#bv");
-    if (!view) return; // si no existe la vista, no hacemos nada
-
-    // Resetea listeners “antiguos”
-    const btnB = cloneToRemoveListeners($("#bvB"));
-    const btnV = cloneToRemoveListeners($("#bvV"));
-    const btnNext = cloneToRemoveListeners($("#bvNext"));
-
-    try {
-      if (!BV.data.length) await bvLoad();
-    } catch (e) {
-      console.error(e);
-      safeShowFeedback("Error cargando bv.json", "error");
-      const wordEl = $("#bvWord");
-      if (wordEl) wordEl.textContent = "(error cargando bv.json)";
-      return;
-    }
-
-    BV.current = bvPickCurrent();
-    bvRender();
-
-    if (btnB) btnB.addEventListener("click", () => bvCheck("b"));
-    if (btnV) btnV.addEventListener("click", () => bvCheck("v"));
-    if (btnNext)
-      btnNext.addEventListener("click", () => {
-        BV.current = bvPickCurrent();
-        bvRender();
-      });
-  }
-
-  // =========================================================
-  // 2) RECURSOS LITERARIOS
-  // JSON esperado (flexible):
-  // array de objetos con:
-  // { recurso, definicion, ejemplo, opciones? }
-  // opciones puede ser array de nombres de recursos (para test)
-  // =========================================================
-  const REC = {
-    data: [],
-    idx: 0,
-    mode: "practice", // "theory" | "practice"
+    rec: [],
+  },
+
+  // Conjugaciones
+  conj: {
+    mode: "reconocer", // reconocer | producir
     current: null,
-  };
+    phase: "answer", // answer | classify (según modo)
+    classify: {
+      modo: null, // Indicativo/Subjuntivo/Imperativo
+      grupo: null, // Presente/Pretérito/Futuro/Condicional
+      tipo: null, // depende del grupo
+    },
+  },
 
-  function recPick() {
-    if (!REC.data.length) return null;
-    const item = REC.data[REC.idx % REC.data.length];
-    REC.idx = (REC.idx + 1) % REC.data.length;
-    return item;
+  // BV
+  bv: {
+    current: null,
+    revealed: false,
+  },
+
+  // Recursos
+  rec: {
+    current: null,
+  },
+};
+
+/* ---------- UI helpers ---------- */
+function showFeedback(msg, kind = "ok") {
+  const el = $("#feedback");
+  if (!el) return;
+  el.style.display = "block";
+  el.classList.remove("ok", "bad");
+  el.classList.add(kind === "ok" ? "ok" : "bad");
+  el.textContent = msg;
+}
+function hideFeedback() {
+  const el = $("#feedback");
+  if (!el) return;
+  el.style.display = "none";
+  el.textContent = "";
+}
+function updateScore() {
+  const el = $("#score");
+  if (!el) return;
+  el.textContent = `Aciertos: ${state.score.ok} / ${state.score.total}`;
+}
+function setView(viewId) {
+  state.view = viewId;
+  $$(".view").forEach((v) => v.classList.remove("active"));
+  const target = $("#" + viewId);
+  if (target) target.classList.add("active");
+  hideFeedback();
+}
+function incTotal() {
+  state.score.total += 1;
+  updateScore();
+}
+function incOK() {
+  state.score.ok += 1;
+  updateScore();
+}
+function resetScore() {
+  state.score.ok = 0;
+  state.score.total = 0;
+  updateScore();
+}
+
+/* ============================================================
+   INIT
+============================================================ */
+async function init() {
+  wireNav();
+
+  try {
+    const [conj, bv, rec] = await Promise.all([
+      fetchJSON(PATHS.conjugaciones).catch(() => []),
+      fetchJSON(PATHS.bv).catch(() => []),
+      fetchJSON(PATHS.recursos).catch(() => []),
+    ]);
+
+    state.data.conj = Array.isArray(conj) ? conj : (conj.items ?? conj.data ?? []);
+    state.data.bv = Array.isArray(bv) ? bv : (bv.items ?? bv.data ?? []);
+    state.data.rec = Array.isArray(rec) ? rec : (rec.items ?? rec.data ?? []);
+
+  } catch (e) {
+    // si algo peta, no tumbamos toda la app
+    console.warn(e);
   }
 
-  function recAllNames() {
-    const names = REC.data
-      .map((x) => (x && (x.recurso || x.name)) ? String(x.recurso || x.name) : "")
-      .filter(Boolean);
-    return Array.from(new Set(names));
-  }
+  updateScore();
+  setView("home");
+}
 
-  function recRender() {
-    const promptEl = $("#recPrompt");
-    const buttonsEl = $("#recButtons");
-    const nextEl = $("#recNext");
-    const theoryBtn = $("#recTheory");
-    const practiceBtn = $("#recPractice");
-
-    if (!promptEl || !buttonsEl) return;
-
-    // Estado visual botones modo
-    if (theoryBtn) theoryBtn.classList.toggle("active", REC.mode === "theory");
-    if (practiceBtn) practiceBtn.classList.toggle("active", REC.mode === "practice");
-
-    if (!REC.current) {
-      promptEl.textContent = "(no hay recursos en recursos.json)";
-      buttonsEl.innerHTML = "";
-      return;
-    }
-
-    const recurso = String(REC.current.recurso || REC.current.name || "").trim();
-    const definicion = String(REC.current.definicion || REC.current.def || "").trim();
-    const ejemplo = String(REC.current.ejemplo || REC.current.example || "").trim();
-
-    if (REC.mode === "theory") {
-      promptEl.innerHTML = `
-        <div style="margin-bottom:10px;"><strong>${recurso}</strong></div>
-        <div style="margin-bottom:10px;">${definicion || ""}</div>
-        <div style="opacity:.9;"><em>${ejemplo || ""}</em></div>
-      `;
-      buttonsEl.innerHTML = "";
-      if (nextEl) nextEl.textContent = "Siguiente";
-      return;
-    }
-
-    // PRACTICE
-    promptEl.innerHTML = `
-      <div style="margin-bottom:10px;"><strong>¿Qué recurso literario es?</strong></div>
-      <div style="opacity:.95;"><em>${ejemplo || "(sin ejemplo)"}</em></div>
-    `;
-
-    // Opciones
-    let options = REC.current.opciones;
-    if (!Array.isArray(options) || options.length < 2) {
-      // construir opciones automáticas
-      const pool = recAllNames().filter((n) => n !== recurso);
-      // coge 3 al azar + la correcta
-      const picked = [];
-      while (pool.length && picked.length < 3) {
-        const i = Math.floor(Math.random() * pool.length);
-        picked.push(pool.splice(i, 1)[0]);
-      }
-      options = [recurso, ...picked].filter(Boolean);
-    }
-
-    // barajar
-    options = options.slice().sort(() => Math.random() - 0.5);
-
-    buttonsEl.innerHTML = "";
-    options.forEach((opt) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.className = "btn";
-      b.textContent = opt;
-      b.addEventListener("click", () => {
-        const ok = strip(opt) === strip(recurso);
-        if (ok) safeShowFeedback("¡Correcto!", "ok");
-        else safeShowFeedback(`No. Era: ${recurso}`, "error");
-      });
-      buttonsEl.appendChild(b);
-    });
-
-    if (nextEl) nextEl.textContent = "Siguiente";
-  }
-
-  async function recLoad() {
-    const path =
-      (window.PATHS && window.PATHS.recursos) || "data/recursos.json";
-
-    const res = await fetch(path, { cache: "no-store" });
-    if (!res.ok) throw new Error("No se pudo cargar " + path);
-    const json = await res.json();
-    REC.data = Array.isArray(json) ? json : (json.items || json.data || []);
-  }
-
-  async function initREC_PATCH() {
-    const view = $("#recursos");
-    if (!view) return;
-
-    // Resetea listeners
-    const theoryBtn = cloneToRemoveListeners($("#recTheory"));
-    const practiceBtn = cloneToRemoveListeners($("#recPractice"));
-    const nextBtn = cloneToRemoveListeners($("#recNext"));
-
-    try {
-      if (!REC.data.length) await recLoad();
-    } catch (e) {
-      console.error(e);
-      safeShowFeedback("Error cargando recursos.json", "error");
-      const promptEl = $("#recPrompt");
-      if (promptEl) promptEl.textContent = "(error cargando recursos.json)";
-      return;
-    }
-
-    REC.current = recPick();
-    REC.mode = "practice";
-    recRender();
-
-    if (theoryBtn)
-      theoryBtn.addEventListener("click", () => {
-        REC.mode = "theory";
-        recRender();
-      });
-
-    if (practiceBtn)
-      practiceBtn.addEventListener("click", () => {
-        REC.mode = "practice";
-        recRender();
-      });
-
-    if (nextBtn)
-      nextBtn.addEventListener("click", () => {
-        REC.current = recPick();
-        recRender();
-      });
-  }
-
-  // Arranque: cuando cargue la página, inicializa BV y Recursos (sin tocar conjugaciones)
-  window.addEventListener("DOMContentLoaded", () => {
-    initBV_PATCH();
-    initREC_PATCH();
+function wireNav() {
+  // Home buttons
+  $("#homeConj")?.addEventListener("click", () => {
+    setView("conjugaciones");
+    startConjugaciones();
   });
-})();
+  $("#homeBV")?.addEventListener("click", () => {
+    setView("bv");
+    startBV();
+  });
+  $("#homeRec")?.addEventListener("click", () => {
+    setView("recursos");
+    startRecursos();
+  });
+
+  // Footer
+  $("#btn-home")?.addEventListener("click", () => setView("home"));
+  $("#btn-reset")?.addEventListener("click", () => {
+    resetScore();
+    hideFeedback();
+  });
+}
+
+/* ============================================================
+   CONJUGACIONES
+   - Dos modos:
+     1) Reconocer: frase -> extraer forma verbal (como ya tenías)
+     2) Producir: sale una forma (del JSON) y Pablo la clasifica en 3 pasos
+============================================================ */
+
+function startConjugaciones() {
+  // Por defecto dejamos el modo que ya tuvieses marcado en UI, si existe
+  renderConjModeButtons();
+  nextConjItem();
+  renderConjugaciones();
+}
+
+function renderConjModeButtons() {
+  const btnRec = $("#conjModeRec");
+  const btnProd = $("#conjModeProd");
+
+  // si no existen, no pasa nada (tu HTML puede no tenerlos)
+  btnRec?.addEventListener("click", () => {
+    state.conj.mode = "reconocer";
+    state.conj.phase = "answer";
+    hideFeedback();
+    renderConjModeButtons();
+    nextConjItem();
+    renderConjugaciones();
+  });
+  btnProd?.addEventListener("click", () => {
+    state.conj.mode = "producir";
+    state.conj.phase = "classify";
+    hideFeedback();
+    renderConjModeButtons();
+    nextConjItem();
+    renderConjugaciones();
+  });
+
+  // estado visual (si tu CSS usa .selected)
+  if (btnRec) btnRec.classList.toggle("selected", state.conj.mode === "reconocer");
+  if (btnProd) btnProd.classList.toggle("selected", state.conj.mode === "producir");
+}
+
+function nextConjItem() {
+  const arr = state.data.conj;
+  if (!arr || arr.length === 0) {
+    state.conj.current = null;
+    return;
+  }
+  state.conj.current = pickRandom(arr);
+  state.conj.classify = { modo: null, grupo: null, tipo: null };
+  state.conj.phase = state.conj.mode === "reconocer" ? "answer" : "classify";
+}
+
+function renderConjugaciones() {
+  const item = state.conj.current;
+
+  const sentenceEl = $("#conjSentence");
+  const inputEl = $("#conjInput");
+  const checkBtn = $("#conjCheck");
+  const nextBtn = $("#conjNext");
+  const hintBtn = $("#conjHint");
+  const classifyBox = $("#conjClassify");
+
+  if (!item) {
+    sentenceEl && (sentenceEl.textContent = "No hay datos en conjugaciones.json");
+    classifyBox && (classifyBox.innerHTML = "");
+    return;
+  }
+
+  // Reconocer: frase + input; Producir: mostrar forma y clasificar
+  const sentence =
+    getField(item, "frase", "sentence", "texto", "text") ||
+    getField(item, "prompt", "enunciado") ||
+    "";
+
+  const expected =
+    getField(item, "verbo", "respuesta", "answer", "target", "forma") || "";
+
+  const form =
+    getField(item, "forma", "form", "conjugacion", "conjugated") || expected;
+
+  if (state.conj.mode === "reconocer") {
+    // UI reconocer
+    if (sentenceEl) sentenceEl.textContent = sentence || "(sin frase en el JSON)";
+    if (inputEl) {
+      inputEl.value = "";
+      inputEl.style.display = "inline-block";
+    }
+    checkBtn && (checkBtn.style.display = "inline-block");
+    hintBtn && (hintBtn.style.display = "inline-block");
+    nextBtn && (nextBtn.style.display = "inline-block");
+    if (classifyBox) classifyBox.style.display = "none";
+
+    checkBtn?.onclick = () => {
+      const user = normalizeAnswer(inputEl?.value || "");
+      const ok = normalizeAnswer(user) === normalizeAnswer(expected);
+      incTotal();
+      if (ok) {
+        incOK();
+        showFeedback("¡Correcto!", "ok");
+      } else {
+        showFeedback(`No. La respuesta era: "${expected}"`, "bad");
+      }
+    };
+
+    hintBtn?.onclick = () => {
+      if (expected) showFeedback(`Pista: empieza por "${expected.slice(0, 2)}..."`, "ok");
+    };
+
+    nextBtn?.onclick = () => {
+      hideFeedback();
+      nextConjItem();
+      renderConjugaciones();
+    };
+
+    return;
+  }
+
+  // Modo PRODUCIR (clasificación 3 pasos)
+  if (sentenceEl) sentenceEl.textContent = `Forma: ${form || "(sin forma en el JSON)"}`;
+
+  // ocultamos input de reconocer
+  if (inputEl) inputEl.style.display = "none";
+  checkBtn && (checkBtn.style.display = "none");
+  hintBtn && (hintBtn.style.display = "none");
+
+  if (classifyBox) {
+    classifyBox.style.display = "block";
+    classifyBox.innerHTML = buildConjClassifyUI();
+    wireConjClassifyHandlers();
+  }
+
+  nextBtn?.onclick = () => {
+    hideFeedback();
+    nextConjItem();
+    renderConjugaciones();
+  };
+}
+
+function buildConjClassifyUI() {
+  // Paso 2 SIEMPRE: Presente / Pretérito / Futuro / Condicional (como has pedido)
+  // Paso 3 DEPENDE de Paso 2
+  const modo = state.conj.classify.modo;
+  const grupo = state.conj.classify.grupo;
+  const tipo = state.conj.classify.tipo;
+
+  const btn = (id, label, active) =>
+    `<button type="button" class="pill ${active ? "selected" : ""}" data-pick="${id}">${label}</button>`;
+
+  const modoRow = [
+    btn("modo:Indicativo", "Indicativo", modo === "Indicativo"),
+    btn("modo:Subjuntivo", "Subjuntivo", modo === "Subjuntivo"),
+    btn("modo:Imperativo", "Imperativo", modo === "Imperativo"),
+  ].join("");
+
+  const grupoRow = [
+    btn("grupo:Presente", "Presente", grupo === "Presente"),
+    btn("grupo:Pretérito", "Pretérito", grupo === "Pretérito"),
+    btn("grupo:Futuro", "Futuro", grupo === "Futuro"),
+    btn("grupo:Condicional", "Condicional", grupo === "Condicional"),
+  ].join("");
+
+  let tipoRow = "";
+  if (grupo === "Presente") {
+    // como pediste: puede no haber 3) o quedarse “Presente simple”
+    tipoRow = btn("tipo:Presente simple", "Presente simple", tipo === "Presente simple");
+  } else if (grupo === "Pretérito") {
+    tipoRow = [
+      btn("tipo:Perfecto simple", "Perfecto simple", tipo === "Perfecto simple"),
+      btn("tipo:Perfecto compuesto", "Perfecto compuesto", tipo === "Perfecto compuesto"),
+      btn("tipo:Imperfecto", "Imperfecto", tipo === "Imperfecto"),
+      btn("tipo:Pluscuamperfecto", "Pluscuamperfecto", tipo === "Pluscuamperfecto"),
+      btn("tipo:Anterior", "Anterior", tipo === "Anterior"),
+    ].join("");
+  } else if (grupo === "Futuro") {
+    tipoRow = [
+      btn("tipo:Futuro simple", "Futuro simple", tipo === "Futuro simple"),
+      btn("tipo:Futuro compuesto", "Futuro compuesto", tipo === "Futuro compuesto"),
+    ].join("");
+  } else if (grupo === "Condicional") {
+    tipoRow = [
+      btn("tipo:Condicional simple", "Condicional simple", tipo === "Condicional simple"),
+      btn("tipo:Condicional compuesto", "Condicional compuesto", tipo === "Condicional compuesto"),
+    ].join("");
+  } else {
+    tipoRow = `<div class="muted">Elige antes el paso 2.</div>`;
+  }
+
+  return `
+    <div class="muted">Clasifica esta forma en 3 pasos.</div>
+
+    <div class="step">
+      <div class="stepTitle">1) Modo</div>
+      <div class="pillRow">${modoRow}</div>
+    </div>
+
+    <div class="step">
+      <div class="stepTitle">2) Tiempo (grupo)</div>
+      <div class="pillRow">${grupoRow}</div>
+    </div>
+
+    <div class="step">
+      <div class="stepTitle">3) Tipo exacto</div>
+      <div class="pillRow">${tipoRow}</div>
+    </div>
+
+    <div class="row">
+      <button type="button" class="btn" id="conjProdCheck">Comprobar</button>
+    </div>
+  `;
+}
+
+function wireConjClassifyHandlers() {
+  const box = $("#conjClassify");
+  if (!box) return;
+
+  box.querySelectorAll("[data-pick]").forEach((b) => {
+    b.addEventListener("click", () => {
+      const [k, v] = b.dataset.pick.split(":");
+      if (k === "modo") state.conj.classify.modo = v;
+      if (k === "grupo") {
+        state.conj.classify.grupo = v;
+        state.conj.classify.tipo = null; // MUY IMPORTANTE: tipo depende del grupo
+      }
+      if (k === "tipo") state.conj.classify.tipo = v;
+
+      // re-render para que se vea seleccionado y cambie el paso 3
+      renderConjugaciones();
+    });
+  });
+
+  box.querySelector("#conjProdCheck")?.addEventListener("click", () => {
+    const item = state.conj.current;
+    if (!item) return;
+
+    // Intentamos leer del JSON la “verdad”.
+    // Si no existe en tu JSON, no marcamos mal: avisamos.
+    const truthModo = getField(item, "modo", "mode");
+    const truthGrupo = getField(item, "grupo", "tiempoGrupo", "grupoTiempo");
+    const truthTipo = getField(item, "tipo", "tiempo", "tenseExacto", "exact");
+
+    if (!truthModo || !truthGrupo || !truthTipo) {
+      showFeedback("No puedo corregir porque faltan campos (modo/grupo/tipo) en conjugaciones.json.", "bad");
+      return;
+    }
+
+    const ok =
+      normalizeAnswer(state.conj.classify.modo) === normalizeAnswer(truthModo) &&
+      normalizeAnswer(state.conj.classify.grupo) === normalizeAnswer(truthGrupo) &&
+      normalizeAnswer(state.conj.classify.tipo) === normalizeAnswer(truthTipo);
+
+    incTotal();
+    if (ok) {
+      incOK();
+      showFeedback("¡Correcto!", "ok");
+    } else {
+      showFeedback(
+        `No. Era: ${truthModo} / ${truthGrupo} / ${truthTipo}`,
+        "bad"
+      );
+    }
+  });
+}
+
+/* ============================================================
+   BV
+   - Arregla el “sale resuelta”: SIEMPRE mostramos hueco.
+   - Soporta varios formatos de JSON:
+     A) { prompt:"bu_car", answer:"buscar", correct:"s" }
+     B) { palabra:"buscar", correcta:"b", pos:0 }
+     C) { word:"vivir", correct:"v" } (inferimos posición)
+============================================================ */
+
+function startBV() {
+  nextBV();
+  renderBV();
+}
+
+function nextBV() {
+  const arr = state.data.bv;
+  if (!arr || arr.length === 0) {
+    state.bv.current = null;
+    return;
+  }
+  state.bv.current = pickRandom(arr);
+  state.bv.revealed = false;
+}
+
+function maskBVWord(word, correctLetter, pos) {
+  const w = String(word || "");
+  if (!w) return "";
+
+  // si viene una “plantilla” con "_" o "?" ya está lista
+  if (w.includes("_") || w.includes("?")) return w;
+
+  const letter = String(correctLetter || "").toLowerCase();
+  let idx = Number.isFinite(pos) ? pos : -1;
+
+  if (idx < 0 && (letter === "b" || letter === "v")) {
+    // buscamos primera ocurrencia de la letra correcta
+    idx = w.toLowerCase().indexOf(letter);
+  }
+  if (idx < 0) {
+    // si no se puede inferir, intentamos encontrar cualquier b/v y ocultarla
+    const ib = w.toLowerCase().indexOf("b");
+    const iv = w.toLowerCase().indexOf("v");
+    idx = Math.min(...[ib, iv].filter((x) => x >= 0));
+  }
+  if (idx < 0) return w; // sin b/v, devolvemos tal cual
+
+  return w.slice(0, idx) + "_" + w.slice(idx + 1);
+}
+
+function renderBV() {
+  const item = state.bv.current;
+  const wordEl = $("#bvWord");
+  const revealEl = $("#bvReveal");
+  const btnB = $("#bvB");
+  const btnV = $("#bvV");
+  const btnNext = $("#bvNext");
+
+  if (!item) {
+    wordEl && (wordEl.textContent = "No hay datos en bv.json");
+    return;
+  }
+
+  const full =
+    getField(item, "answer", "palabra", "word", "solucion", "correctWord") || "";
+
+  const prompt =
+    getField(item, "prompt", "hueco", "masked", "plantilla") || "";
+
+  const correct =
+    String(getField(item, "correct", "correcta", "letra", "letter") || "").toLowerCase();
+
+  const posRaw = getField(item, "pos", "idx", "index");
+  const pos = posRaw === "" ? NaN : Number(posRaw);
+
+  const display = prompt || maskBVWord(full, correct, pos);
+
+  if (wordEl) wordEl.textContent = display ? display : "(sin palabra en bv.json)";
+
+  if (revealEl) revealEl.style.display = "none";
+
+  btnB?.addEventListener("click", () => checkBV("b", full, correct));
+  btnV?.addEventListener("click", () => checkBV("v", full, correct));
+  btnNext?.addEventListener("click", () => {
+    hideFeedback();
+    nextBV();
+    renderBV();
+  });
+}
+
+function checkBV(pick, full, correct) {
+  // si el JSON no trae “correct”, lo inferimos mirando si la palabra tiene b o v en el hueco (pero puede fallar)
+  let truth = correct;
+  if (truth !== "b" && truth !== "v") {
+    // inferencia: si contiene b y no v, b; si contiene v y no b, v; si ambas, no se puede
+    const wb = normalizeAnswer(full).includes("b");
+    const wv = normalizeAnswer(full).includes("v");
+    truth = wb && !wv ? "b" : wv && !wb ? "v" : "";
+  }
+
+  incTotal();
+  if (!truth) {
+    showFeedback("No puedo corregir porque bv.json no indica cuál es la letra correcta (b/v).", "bad");
+    return;
+  }
+
+  if (pick === truth) {
+    incOK();
+    showFeedback("¡Correcto!", "ok");
+  } else {
+    showFeedback(`No. Era "${truth}".`, "bad");
+  }
+}
+
+/* ============================================================
+   RECURSOS LITERARIOS
+   - Elimina el placeholder y muestra ejercicio real si hay datos
+   - Soporta formatos:
+     A) { texto, opciones:[...], correcta }
+     B) { prompt, choices:[...], answer }
+============================================================ */
+
+function startRecursos() {
+  nextRecurso();
+  renderRecursos();
+}
+
+function nextRecurso() {
+  const arr = state.data.rec;
+  if (!arr || arr.length === 0) {
+    state.rec.current = null;
+    return;
+  }
+  state.rec.current = pickRandom(arr);
+}
+
+function renderRecursos() {
+  const item = state.rec.current;
+  const promptEl = $("#recPrompt");
+  const buttonsEl = $("#recButtons");
+  const nextBtn = $("#recNext");
+
+  if (!promptEl || !buttonsEl) return;
+
+  if (!item) {
+    promptEl.textContent = "No hay datos en recursos.json";
+    buttonsEl.innerHTML = "";
+    nextBtn?.addEventListener("click", () => {});
+    return;
+  }
+
+  const prompt = getField(item, "texto", "prompt", "frase", "text") || "(sin texto)";
+  const options =
+    getField(item, "opciones", "choices", "options") || [];
+
+  const correct = getField(item, "correcta", "answer", "correct", "solution");
+
+  promptEl.textContent = prompt;
+
+  const opts = Array.isArray(options) ? options : [];
+  if (opts.length === 0) {
+    buttonsEl.innerHTML =
+      `<div class="muted">recursos.json cargado, pero no trae "opciones/choices".</div>`;
+  } else {
+    buttonsEl.innerHTML = opts
+      .map((o, i) => `<button type="button" class="pill" data-rec="${i}">${o}</button>`)
+      .join("");
+    buttonsEl.querySelectorAll("[data-rec]").forEach((b) => {
+      b.addEventListener("click", () => {
+        const i = Number(b.dataset.rec);
+        const picked = opts[i];
+
+        if (!correct) {
+          showFeedback("No puedo corregir porque recursos.json no indica la respuesta correcta.", "bad");
+          return;
+        }
+
+        incTotal();
+        const ok = normalizeAnswer(picked) === normalizeAnswer(correct);
+        if (ok) {
+          incOK();
+          showFeedback("¡Correcto!", "ok");
+        } else {
+          showFeedback(`No. Era: ${correct}`, "bad");
+        }
+      });
+    });
+  }
+
+  nextBtn?.addEventListener("click", () => {
+    hideFeedback();
+    nextRecurso();
+    renderRecursos();
+  });
+}
+
+/* ============================================================
+   Arranque
+============================================================ */
+init();
